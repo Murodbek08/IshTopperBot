@@ -6,6 +6,7 @@ import { prisma } from "./lib/prisma";
 import { startBot } from "./modules/bot";
 import { startParser } from "./modules/parser";
 import axios from "axios";
+import http from "http";
 
 setInterval(
   () => {
@@ -31,6 +32,16 @@ async function main() {
     logger.error(CTX, "DB ulanishida xato!", { error: err.message });
     process.exit(1);
   }
+
+  const PORT = process.env.PORT || 3000;
+  http
+    .createServer((_, res) => {
+      res.writeHead(200);
+      res.end("IshBot ishlayapti ✅");
+    })
+    .listen(PORT, () => {
+      logger.info(CTX, `Health check server: port ${PORT}`);
+    });
 
   // Bot va parser'ni parallel ishga tushiramiz
   await Promise.all([
