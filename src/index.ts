@@ -5,6 +5,18 @@ import { logger } from "./lib/logger";
 import { prisma } from "./lib/prisma";
 import { startBot } from "./modules/bot";
 import { startParser } from "./modules/parser";
+import axios from "axios";
+
+setInterval(
+  () => {
+    const RENDER_URL = "https://ishtopperbot.onrender.com";
+    axios
+      .get(RENDER_URL)
+      .then(() => console.log("⏰ Bot uyg'oq saqlandi!"))
+      .catch((err) => console.log("⏰ Uyg'otish xabari yuborildi."));
+  },
+  10 * 60 * 1000,
+);
 
 const CTX = "Main";
 
