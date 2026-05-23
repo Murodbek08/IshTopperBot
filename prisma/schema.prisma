@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Vacancy ──────────────────────────────────────────────────────────────────
+model Vacancy {
+  id            Int            @id @default(autoincrement())
+  // Raw text from Telegram channel
+  text          String
+  channel       String
+  messageId     BigInt         @unique
+
+  // Parsed structured fields (null = could not parse)
+  title         String?        // "Frontend o'qituvchi kerak"
+  company       String?        // "IT Time Academy"
+  location      String?        // "Namangan"
+  salary        String?        // "Suhbat asosida" or "3_000_000"
+  salaryMin     Int?           // parsed numeric min
+  technologies  String[]       // ["React", "JavaScript", "HTML", "CSS"]
+  telegramContact String?      // "@Asadbek_0805"
+  phone         String?        // "+998941445597"
+  workType      String?        // "remote" | "office" | "hybrid"
+  level         String?        // "junior" | "middle" | "senior"
+
+  createdAt     DateTime       @default(now())
+  notifications Notification[]
+
+  @@index([createdAt])
+  @@index([channel])
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+model User {
+  telegramId    BigInt         @id
+  username      String?
+  firstName     String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  filters       Filter[]
+  notifications Notification[]
+}
+
+// ─── Filter ───────────────────────────────────────────────────────────────────
+model Filter {
+  id          Int      @id @default(autoincrement())
+  userId      BigInt
+  keywords    String[] // ["frontend", "react"]
+  location    String?  // "toshkent" | "remote" | null = everywhere
+  minSalary   Int?     // numeric min salary filter
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [telegramId], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Notification ─────────────────────────────────────────────────────────────
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    BigInt
+  vacancyId Int
+  sentAt    DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [telegramId], onDelete: Cascade)
+  vacancy   Vacancy  @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vacancyId])
+  @@index([userId])
+}
