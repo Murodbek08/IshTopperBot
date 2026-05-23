@@ -207,9 +207,9 @@ async function runWithConcurrency<T>(
   limit: number,
 ): Promise<void> {
   let i = 0;
-  async function worker() {
+  async function worker(): Promise<void> {
     while (i < items.length) {
-      const item = items[i++];
+      const item = items[i++] as T;
       await fn(item);
     }
   }
