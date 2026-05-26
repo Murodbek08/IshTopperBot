@@ -146,7 +146,6 @@ const KNOWN_TECHNOLOGIES: string[] = [
   "LEGO", "Arduino", "Scratch",
   "1C",
   "SAP",
-  "Figma",
 ];
 
 // ─── Constants ────────────────────────────────────────────────────────────────

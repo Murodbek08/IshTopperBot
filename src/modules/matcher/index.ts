@@ -2,7 +2,7 @@ import { prisma } from "../../lib/prisma";
 import { logger } from "../../lib/logger";
 import { escapeHtml } from "../bot/utils";
 import { bot } from "../bot";
-import type { Vacancy } from "@prisma/client";
+import type { Vacancy, Filter } from "@prisma/client";
 import { WORK_TYPES, LEVELS, LOCATIONS } from "../bot/filter-data";
 
 const CTX = "Matcher";
@@ -198,7 +198,7 @@ export async function matchAndNotify(vacancyId: number): Promise<void> {
   if (!vacancy) return;
 
   // Rezyumelarga notification yuborilmaydi
-  if ((vacancy as any).jobType === "resume") return;
+  if (vacancy.jobType === "resume") return;
 
   const filters = await prisma.filter.findMany({
     where: { user: { isActive: true } },
@@ -221,9 +221,9 @@ export async function matchAndNotify(vacancyId: number): Promise<void> {
       score: scoreMatch(vacancy, {
         keywords:  f.keywords,
         location:  f.location,
-        workType:  (f as any).workType,
+        workType:  f.workType,
         minSalary: f.minSalary,
-        level:     (f as any).level,
+        level:     f.level,
       }),
     }))
     .filter(({ score }) => score > 0)

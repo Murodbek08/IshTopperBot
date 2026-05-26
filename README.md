@@ -168,7 +168,7 @@ NODE_ENV         →  production
 `src/modules/parser/index.ts` da `CHANNELS` arrayni tahrirlang:
 
 ```ts
-const CHANNELS: string[] = [
+const CHANNELS = [
   "UstozShogird",
   "vakansiyalar_uz_uz",
   "freelancer_Uzbek",
@@ -198,7 +198,7 @@ const CHANNELS: string[] = [
   "rizqimuz",
   "frontEndJobo",
   "frontendVacancy",
-];
+] as const;
 ```
 
 > ⚠️ Har bir kanalga Telegram da a'zo bo'lish shart

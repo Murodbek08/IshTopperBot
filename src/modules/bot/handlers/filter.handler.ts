@@ -261,11 +261,14 @@ function filterCard(f: any, index: number): string {
 
   // keywords → texnologiya nomlarini ajratib ko'rsatish
   const techsDisplay = f.keywords
-    .filter((k: string) => k !== f.field)
+    .filter((k: string) => k !== f.fieldKey)
     .join(", ") || "—";
 
+  // fieldLabel ni olish
+  const fieldLabel = f.fieldLabel ?? (f.fieldKey ? FIELDS[f.fieldKey]?.label ?? "Filter" : "Filter");
+
   return (
-    `<b>${index + 1}. ${escapeHtml(f.fieldLabel ?? "Filter")}</b>\n` +
+    `<b>${index + 1}. ${escapeHtml(fieldLabel)}</b>\n` +
     `   🛠 <code>${escapeHtml(techsDisplay)}</code>\n` +
     `   📊 ${levelLabel}  |  ${workLabel}\n` +
     `   📍 ${locLabel}  |  💰 ${salary}`
@@ -424,12 +427,15 @@ export function registerFilterHandlers(bot: Telegraf, sessions: SessionStore) {
     // Prisma ga saqlash
     await prisma.filter.create({
       data: {
-        userId:    BigInt(ctx.from.id),
-        keywords:  [...new Set(techKeywords)], // duplicate yo'q
-        location:  locationStr,
-        workType:  session.workType ?? null,
-        minSalary: minSalary,
-      } as any,
+        userId:     BigInt(ctx.from.id),
+        keywords:   [...new Set(techKeywords)], // duplicate yo'q
+        location:   locationStr,
+        workType:   session.workType ?? null,
+        level:      session.level ?? null,
+        minSalary:  minSalary,
+        fieldKey:   session.field ?? null,
+        fieldLabel: session.field ? FIELDS[session.field]?.label ?? null : null,
+      },
     });
 
     sessions.delete(ctx.from.id);

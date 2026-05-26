@@ -45,9 +45,6 @@ const CHANNELS = [
   "rizqimuz",
   "frontEndJobo",
   "frontendVacancy",
-  // Umumiy ish kanallari
-  "uzdev_jobs",
-  "UzDev_Jobs",
 ] as const;
 
 // ─── Spam / reklama filterlash ────────────────────────────────────────────────

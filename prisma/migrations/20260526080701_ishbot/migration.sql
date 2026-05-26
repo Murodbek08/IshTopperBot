@@ -21,6 +21,7 @@ CREATE TABLE "Filter" (
     "level" TEXT,
     "minSalary" INTEGER,
     "fieldKey" TEXT,
+    "fieldLabel" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "Filter_pkey" PRIMARY KEY ("id")

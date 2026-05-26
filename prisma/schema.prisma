@@ -28,6 +28,7 @@ model Filter {
   level     String?  // "intern"|"junior"|"middle"|"senior"|"lead"|null
   minSalary Int?     // minimal maosh so'mda
   fieldKey  String?  // "frontend"|"backend"|... (display uchun)
+  fieldLabel String? // "Frontend", "Backend" (display uchun)
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [telegramId], onDelete: Cascade)
