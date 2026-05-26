@@ -13,4 +13,4 @@ COPY . .
 RUN npx prisma generate
 RUN npm run build
 
-CMD npx prisma migrate deploy && node dist/index.js
+CMD npx prisma db push && node dist/index.js
