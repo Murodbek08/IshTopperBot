@@ -78,11 +78,23 @@ export function registerMessageHandler(bot: Telegraf, sessions: SessionStore) {
       return;
     }
 
-    // Boshqa noma'lum holat
-    sessions.delete(userId);
+    // Boshqa noma'lum holat — sessionni o'chirmaymiz, foydalanuvchini yo'naltiramiz
+    const stepNames: Record<string, string> = {
+      awaiting_field:         "1/6 — Soha tanlash",
+      awaiting_technologies:  "2/6 — Texnologiyalar",
+      awaiting_custom_tech:   "2/6 — Texnologiyalar (yozish)",
+      awaiting_level:         "3/6 — Daraja",
+      awaiting_work_type:     "4/6 — Ish turi",
+      awaiting_location:      "5/6 — Viloyat",
+      awaiting_salary:        "6/6 — Maosh",
+    };
+    const stepHint = stepNames[session.step] ?? "Filter yaratish";
+
     await ctx.reply(
-      "Buyruqni tushunmadim 🤔\n\nPastdagi tugmalardan foydalaning 👇",
-      mainKeyboard(),
+      `⚠️ <b>Hozir filter yaratish jarayonidasiz</b>\n\n` +
+      `📌 <b>${stepHint}</b> — iltimos, pastdagi tugmalardan foydalaning 👇\n\n` +
+      `🔄 <i>Yangi filter yaratishni boshidan boshlash uchun /filter buyrug'ini yuboring</i>`,
+      { parse_mode: "HTML" },
     );
   });
 }
