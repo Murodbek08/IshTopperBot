@@ -11,11 +11,10 @@ dotenv.config();
 const CTX = "Bot";
 
 if (!process.env.BOT_TOKEN) {
-  throw new Error("BOT_TOKEN environment variable is required");
+  throw new Error("BOT_TOKEN environment variable kerak!");
 }
 
 export const bot = new Telegraf(process.env.BOT_TOKEN);
-
 const sessions = createSessionStore();
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -24,18 +23,20 @@ registerFilterHandlers(bot, sessions);
 registerMessageHandler(bot, sessions);
 
 // ─── Global error handler ─────────────────────────────────────────────────────
-bot.catch((err: unknown, ctx) => {
-  logger.error(CTX, `Unhandled bot error for update ${ctx.update.update_id}`, {
-    error: err instanceof Error ? err.message : String(err),
+bot.catch((err: any, ctx) => {
+  logger.error(CTX, `Update xatosi: ${err.message}`, {
+    updateType: ctx.updateType,
+    user: ctx.from?.id,
   });
 });
 
-// ─── Launch ───────────────────────────────────────────────────────────────────
 export async function startBot(): Promise<void> {
-  await bot.launch();
-  logger.info(CTX, "Bot ishga tushdi ✅");
+  await bot.launch({
+    dropPendingUpdates: true, // eski xabarlarni o'tkazib yuborish
+  });
 
-  // Graceful shutdown
+  logger.info(CTX, `Bot ishga tushdi: @${bot.botInfo?.username} ✅`);
+
   process.once("SIGINT", () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 }

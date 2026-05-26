@@ -12,9 +12,10 @@ dotenv.config();
 
 const CTX = "Parser";
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Kanallar ro'yxati ────────────────────────────────────────────────────────
 
 const CHANNELS = [
+  // IT / Dev
   "UstozShogird",
   "vakansiyalar_uz_uz",
   "freelancer_Uzbek",
@@ -44,7 +45,28 @@ const CHANNELS = [
   "rizqimuz",
   "frontEndJobo",
   "frontendVacancy",
+  // Umumiy ish kanallari
+  "uzdev_jobs",
+  "UzDev_Jobs",
 ] as const;
+
+// ─── Spam / reklama filterlash ────────────────────────────────────────────────
+
+const SPAM_PATTERNS = [
+  /t\.me\/joinchat/i,              // kanal taklifi
+  /подпишитесь|obuna bo.ling/i,    // obuna so'rovi (reklama)
+  /рефeral|referral|affiliate/i,
+  /казино|casino|bukmeker/i,
+  /kriptovalyuta investitsiya/i,
+  /earn \$\d+/i,
+  /100% daromad/i,
+];
+
+function isSpam(text: string): boolean {
+  // Juda qisqa xabarlar
+  if (text.trim().length < 50) return true;
+  return SPAM_PATTERNS.some((p) => p.test(text));
+}
 
 // ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -56,24 +78,29 @@ function createClient(): TelegramClient {
     throw new Error("API_ID va API_HASH environment variable kerak");
   }
 
-  // SESSION env'dan olish yoki bo'sh string (birinchi marta auth)
-  const sessionString = process.env.SESSION_STRING ?? "";
-  const session = new StringSession(sessionString);
-
+  const session = new StringSession(process.env.SESSION_STRING ?? "");
   return new TelegramClient(session, apiId, apiHash, {
     connectionRetries: 5,
+    retryDelay: 2000,
   });
 }
 
 // ─── Event handler ────────────────────────────────────────────────────────────
 
-async function handleNewMessage(event: NewMessageEvent): Promise<void> {
+async function handleNewMessage(
+  event: NewMessageEvent,
+  client: TelegramClient,
+): Promise<void> {
   const message = event.message;
+  if (!message.text || message.text.trim().length < 30) return;
 
-  // Faqat matnli xabarlarni qabul qilamiz
-  if (!message.text || message.text.trim().length < 20) return;
+  // Spam tekshiruvi
+  if (isSpam(message.text)) {
+    logger.debug(CTX, "Spam/reklama — o'tkazildi");
+    return;
+  }
 
-  // Channel nomini aniqlaymiz
+  // Channel nomini aniqlash
   let channelName = "unknown";
   try {
     const chat = await message.getChat();
@@ -83,7 +110,7 @@ async function handleNewMessage(event: NewMessageEvent): Promise<void> {
       channelName = chat.title;
     }
   } catch {
-    // ignore
+    // ignore — ba'zan getChat() ishlamaydi
   }
 
   const messageId = BigInt(message.id);
@@ -97,18 +124,19 @@ async function handleNewMessage(event: NewMessageEvent): Promise<void> {
 
   // Parse qilish
   const parsed = parseVacancy(message.text);
-
-  // Vakansiyaga o'xshamasa saqlashdan o'tamiz
   if (!parsed) {
-    logger.debug(CTX, `Vakansiya emas, o'tkazib yuborildi`, { channelName });
+    logger.debug(CTX, `Vakansiya emas — ${channelName}`);
     return;
   }
 
-  logger.info(CTX, `Yangi vakansiya aniqlandi`, {
+  logger.info(CTX, `Yangi vakansiya`, {
     channel: channelName,
     title: parsed.title,
     company: parsed.company,
     techs: parsed.technologies,
+    type: parsed.jobType,
+    level: parsed.level,
+    workType: parsed.workType,
   });
 
   // DB ga saqlash
@@ -130,7 +158,7 @@ async function handleNewMessage(event: NewMessageEvent): Promise<void> {
     },
   });
 
-  // Matching va notification
+  // Matching va xabarnoma
   await matchAndNotify(vacancy.id);
 }
 
@@ -139,33 +167,32 @@ async function handleNewMessage(event: NewMessageEvent): Promise<void> {
 export async function startParser(): Promise<void> {
   const client = createClient();
 
-  // Auth
   await client.start({
-    phoneNumber: async () => input.text("📱 Telefon raqamingiz: "),
-    password: async () => input.text("🔒 2FA parolingiz (bo'lmasa Enter): "),
-    phoneCode: async () => input.text("📨 SMS kodingiz: "),
-    onError: (err) => logger.error(CTX, "Auth xatosi", { error: err.message }),
+    phoneNumber: async () => input.text("📱 Telefon raqamingiz (+998...): "),
+    password: async () => input.text("🔒 2FA parol (bo'lmasa Enter): "),
+    phoneCode: async () => input.text("📨 SMS kod: "),
+    onError: (err) => logger.error(CTX, "Auth xato", { error: err.message }),
   });
 
-  // Session string'ni bir marta konsolga chiqaramiz — .env ga qo'yish uchun
+  // Session ni bir marta log qilamiz
   const savedSession = client.session.save() as unknown as string;
   if (savedSession && !process.env.SESSION_STRING) {
     logger.info(
       CTX,
-      "✅ Yangi session yaratildi. Quyidagini .env ga qo'ying:\n" +
-        `SESSION_STRING="${savedSession}"`,
+      `✅ Session yaratildi. .env ga qo'ying:\nSESSION_STRING="${savedSession}"`,
     );
   }
 
-  // Channel'larga subscribe
   const chats = CHANNELS.map((ch) => `@${ch}`);
-  client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
+
+  client.addEventHandler(
+    (event: NewMessageEvent) => handleNewMessage(event, client),
+    new NewMessage({ chats }),
+  );
 
   logger.info(
     CTX,
-    `Parser ishga tushdi. ${CHANNELS.length} kanal kuzatilmoqda ✅`,
-    {
-      channels: CHANNELS,
-    },
+    `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`,
+    { channels: CHANNELS },
   );
 }

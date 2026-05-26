@@ -1,123 +1,88 @@
 import { Telegraf, Markup } from "telegraf";
-import { prisma } from "../../../lib/prisma";
 import { mainKeyboard } from "./start.handler";
 import type { SessionStore } from "../session";
-
-const SKIP_KEYBOARD = Markup.keyboard([["⏭ O'tkazib yuborish"]])
-  .resize()
-  .oneTime();
+import { FIELDS } from "../filter-data";
 
 export function registerMessageHandler(bot: Telegraf, sessions: SessionStore) {
   bot.on("text", async (ctx) => {
-    const userId = ctx.from.id;
-    const text = ctx.message.text.trim();
+    const userId  = ctx.from.id;
+    const text    = ctx.message.text.trim();
     const session = sessions.get(userId);
 
-    // Session yo'q — odatiy xabar
     if (!session) {
       await ctx.reply(
-        "Buyruqni tushunmadim. Pastdagi tugmalardan foydalaning 👇",
+        "Buyruqni tushunmadim 🤔\n\nPastdagi tugmalardan foydalaning 👇",
         mainKeyboard(),
       );
       return;
     }
 
-    // ─── Step 1: Keywords ───────────────────────────────────────────────────
-    if (session.step === "awaiting_keywords") {
-      const keywords = text
+    // ── Custom texnologiya yozish ──────────────────────────────────────────
+    if (session.step === "awaiting_custom_tech") {
+      const newTechs = text
         .split(/[,;]+/)
-        .map((k) => k.trim().toLowerCase())
+        .map((k) => k.trim())
         .filter((k) => k.length > 0);
 
-      if (keywords.length === 0) {
-        await ctx.reply("❌ Kamida bitta kalit so'z kiriting.");
+      if (newTechs.length === 0) {
+        await ctx.reply("❌ Kamida bitta texnologiya kiriting.");
         return;
       }
 
-      sessions.set(userId, { step: "awaiting_location", keywords });
-
-      await ctx.reply(
-        "📍 <b>2/3 — Shahar</b>\n\n" +
-          "Qaysi shaharda vakansiya qidirasiz?\n\n" +
-          "Misol: <code>toshkent</code>, <code>namangan</code>, <code>remote</code>\n\n" +
-          "<i>O'tkazib yuborish uchun tugmani bosing (hamma shaharlar)</i>",
-        { parse_mode: "HTML", ...SKIP_KEYBOARD },
-      );
-      return;
-    }
-
-    // ─── Step 2: Location ───────────────────────────────────────────────────
-    if (session.step === "awaiting_location") {
-      const location =
-        text === "⏭ O'tkazib yuborish" ? null : text.toLowerCase().trim();
-
+      const combined = [...(session.technologies ?? []), ...newTechs];
       sessions.set(userId, {
         ...session,
-        step: "awaiting_salary",
-        location,
+        step: "awaiting_technologies",
+        technologies: combined,
       });
 
+      const fieldKey = session.field!;
+      const field    = FIELDS[fieldKey];
+
+      // Yangilangan texnologiyalar bilan keyboard qayta ko'rsatamiz
+      const allTechLabels = [
+        ...(field?.technologies.map((t) => t.label) ?? []),
+        ...newTechs.filter(
+          (t) => !field?.technologies.some((ft) => ft.label === t),
+        ),
+      ];
+
+      const techBtns = allTechLabels.map((label) => {
+        const isOn = combined.includes(label);
+        return Markup.button.callback(
+          isOn ? `✅ ${label}` : label,
+          `tech:${label}`,
+        );
+      });
+
+      const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+      for (let i = 0; i < techBtns.length; i += 2) {
+        rows.push(techBtns.slice(i, i + 2));
+      }
+      rows.push([Markup.button.callback("✏️ O'zim yozaman", "tech:__custom__")]);
+      if (combined.length > 0) {
+        rows.push([
+          Markup.button.callback(
+            `✅ Davom etish (${combined.length})`,
+            "tech:__done__",
+          ),
+        ]);
+      }
+
       await ctx.reply(
-        "💰 <b>3/3 — Minimal maosh</b>\n\n" +
-          "Minimal maosh miqdorini kiriting (so'mda):\n" +
-          "Misol: <code>3000000</code>\n\n" +
-          "<i>O'tkazib yuborish uchun tugmani bosing</i>",
-        { parse_mode: "HTML", ...SKIP_KEYBOARD },
+        `✅ <b>Qo'shildi:</b> <code>${newTechs.join(", ")}</code>\n\n` +
+        `Jami tanlangan: <code>${combined.join(", ")}</code>\n\n` +
+        `Davom etish uchun <b>✅ Davom etish</b> tugmasini bosing yoki yana tanlang.`,
+        { parse_mode: "HTML", ...Markup.inlineKeyboard(rows) },
       );
       return;
     }
 
-    // ─── Step 3: Salary ─────────────────────────────────────────────────────
-    if (session.step === "awaiting_salary") {
-      let minSalary: number | null = null;
-
-      if (text !== "⏭ O'tkazib yuborish") {
-        const num = parseInt(text.replace(/\s/g, ""), 10);
-        if (isNaN(num) || num <= 0) {
-          await ctx.reply(
-            "❌ Noto'g'ri format. Faqat raqam kiriting yoki o'tkazib yuboring.",
-            SKIP_KEYBOARD,
-          );
-          return;
-        }
-        minSalary = num;
-      }
-
-      // Filter saqlash
-      await prisma.filter.create({
-        data: {
-          userId: BigInt(userId),
-          keywords: session.keywords!,
-          location: session.location ?? null,
-          minSalary,
-        },
-      });
-
-      sessions.delete(userId);
-
-      // Tasdiqlash xabari
-      let confirmText =
-        "✅ <b>Filter muvaffaqiyatli qo'shildi!</b>\n\n" +
-        `🔑 Kalit so'zlar: <code>${session.keywords!.join(", ")}</code>\n`;
-
-      if (session.location) {
-        confirmText += `📍 Shahar: <b>${session.location}</b>\n`;
-      } else {
-        confirmText += `📍 Shahar: <i>Hammasi</i>\n`;
-      }
-
-      if (minSalary) {
-        confirmText += `💰 Min. maosh: <b>${minSalary.toLocaleString()} so'm</b>\n`;
-      } else {
-        confirmText += `💰 Min. maosh: <i>Belgilanmagan</i>\n`;
-      }
-
-      confirmText += "\n<i>Mos vakansiyalar avtomatik yuboriladi 🚀</i>";
-
-      await ctx.reply(confirmText, {
-        parse_mode: "HTML",
-        ...mainKeyboard(),
-      });
-    }
+    // Boshqa noma'lum holat
+    sessions.delete(userId);
+    await ctx.reply(
+      "Buyruqni tushunmadim 🤔\n\nPastdagi tugmalardan foydalaning 👇",
+      mainKeyboard(),
+    );
   });
 }

@@ -16,15 +16,42 @@ export function registerStartHandler(bot: Telegraf) {
       },
     });
 
-    await ctx.reply(
-      `Salom, ${escapeHtml(first_name ?? "do'stim")}! 👋\n\n` +
-        `Vakansiya botiga xush kelibsiz.\n` +
-        `Men sizga mos vakansiyalarni <b>avtomatik</b> yuboraman.\n\n` +
-        `Filter qo'shib, kerakli texnologiyalar bo'yicha vakansiyalarni kuzating! 🔍`,
+    const name = escapeHtml(first_name ?? "do'stim");
+
+    await ctx.replyWithAnimation(
+      { url: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbzU5eDh5dXhxeXlqaGZ4NHNlYXE4bHN0N3Z5NXBnZm95OW1kMHNlbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKhOpu0NwenH3O/giphy.gif" },
       {
+        caption:
+          `👋 Salom, <b>${name}</b>!\n\n` +
+          `🤖 <b>Vakansiya Bot</b>ga xush kelibsiz!\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `🎯 Men nima qilaman?\n\n` +
+          `📡 <b>29+ kanal</b>dan real-vaqtda vakansiyalarni kuzataman\n` +
+          `🔍 Sizning filtringizga mos kelganlarini <b>avtomatik</b> yuboraman\n` +
+          `⚡ Yangi vakansiya chiqqanida <b>darhol</b> xabar beraman\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `🚀 <b>Boshlash uchun:</b>\n` +
+          `➕ <i>Filter qo'shish</i> tugmasini bosing va yo'nalishingizni tanlang!\n\n` +
+          `💡 <i>Filter qanchalik aniq bo'lsa — vakansiyalar shunchalik mos keladi</i>`,
         parse_mode: "HTML",
         ...mainKeyboard(),
-      },
+      }
+    ).catch(() =>
+      // Agar GIF yuborilmasa — oddiy matn bilan yuborish
+      ctx.reply(
+        `✨ Salom, <b>${name}</b>! 👋\n\n` +
+          `🤖 <b>Vakansiya Bot</b>ga xush kelibsiz!\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `📡 <b>29+ kanal</b>dan real-vaqtda vakansiyalarni kuzataman\n` +
+          `🔍 Filtringizga mos vakansiyalarni <b>avtomatik</b> yuboraman\n` +
+          `⚡ Yangi vakansiya chiqqanida <b>darhol</b> xabar beraman\n\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `🚀 Boshlash uchun <b>➕ Filter qo'shish</b> tugmasini bosing!`,
+        {
+          parse_mode: "HTML",
+          ...mainKeyboard(),
+        }
+      )
     );
   });
 }
