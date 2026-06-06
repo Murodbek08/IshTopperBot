@@ -32,6 +32,20 @@ bot.catch((err: any, ctx) => {
 });
 
 export async function startBot(): Promise<void> {
-  await bot.launch({ dropPendingUpdates: true });
-  logger.info(CTX, `✅ Bot ishga tushdi: @${bot.botInfo?.username}`);
+  // 409 Conflict: eski instance hali o'chmagan — kutib qayta urinamiz
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await bot.launch({ dropPendingUpdates: true });
+      logger.info(CTX, `✅ Bot ishga tushdi: @${bot.botInfo?.username}`);
+      return;
+    } catch (err: any) {
+      if (err?.message?.includes("409") && attempt < 5) {
+        const wait = attempt * 5000; // 5s, 10s, 15s, 20s
+        logger.warn(CTX, `409 Conflict — ${wait / 1000}s kutilmoqda (urinish ${attempt}/5)...`);
+        await new Promise((res) => setTimeout(res, wait));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
