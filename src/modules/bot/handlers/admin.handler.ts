@@ -11,32 +11,105 @@ function isAdmin(id: number): boolean {
   return ADMIN_IDS.includes(id);
 }
 
+// Broadcast kutayotgan adminlar
+const broadcastPending = new Set<number>();
+
 export function registerAdminHandler(bot: Telegraf) {
 
+  // ── /admin ────────────────────────────────────────────────────────────────
   bot.command("admin", async (ctx) => {
-    if (!isAdmin(ctx.from.id)) {
-      await ctx.reply("❌ Ruxsat yo'q.");
-      return;
-    }
-
+    if (!isAdmin(ctx.from.id)) { await ctx.reply("❌ Ruxsat yo'q."); return; }
     await sendAdminStats(ctx);
   });
 
+  // ── Yangilash ─────────────────────────────────────────────────────────────
   bot.action("admin_refresh", async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
     await ctx.answerCbQuery("🔄 Yangilanmoqda...");
     await sendAdminStats(ctx, true);
   });
 
+  // ── Broadcast boshlash ────────────────────────────────────────────────────
   bot.action("admin_broadcast_start", async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
     await ctx.answerCbQuery();
+    broadcastPending.add(ctx.from!.id);
     await ctx.reply(
-      "📢 <b>Broadcast</b>\n\nYubormoqchi bo'lgan xabarni yozing:\n<i>/cancel — bekor qilish</i>",
+      `📢 <b>Broadcast</b>\n\n` +
+      `Barcha faol foydalanuvchilarga yuboriladigan xabarni yozing.\n\n` +
+      `✅ HTML teglari ishlaydi: <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>\n\n` +
+      `/cancel — bekor qilish`,
+      { parse_mode: "HTML" },
+    );
+  });
+
+  // ── /cancel ───────────────────────────────────────────────────────────────
+  bot.command("cancel", async (ctx) => {
+    if (broadcastPending.has(ctx.from.id)) {
+      broadcastPending.delete(ctx.from.id);
+      await ctx.reply("❌ Broadcast bekor qilindi.", Markup.removeKeyboard());
+    }
+  });
+
+  // ── Broadcast xabarini ushlab yuborish ────────────────────────────────────
+  bot.on("text", async (ctx, next) => {
+    const userId = ctx.from.id;
+    if (!isAdmin(userId) || !broadcastPending.has(userId)) {
+      return next(); // admin emas yoki broadcast kutmayapti — o'tkazamiz
+    }
+
+    broadcastPending.delete(userId);
+    const messageText = ctx.message.text;
+
+    if (messageText === "/cancel") {
+      await ctx.reply("❌ Broadcast bekor qilindi.");
+      return;
+    }
+
+    // Faol foydalanuvchilar ro'yxati
+    const users = await prisma.user.findMany({
+      where:  { isActive: true },
+      select: { telegramId: true },
+    });
+
+    await ctx.reply(
+      `📢 <b>Broadcast boshlanmoqda...</b>\n` +
+      `👥 ${users.length} ta foydalanuvchiga yuboriladi`,
+      { parse_mode: "HTML" },
+    );
+
+    let sent = 0, failed = 0;
+
+    for (const user of users) {
+      try {
+        await bot.telegram.sendMessage(user.telegramId.toString(), messageText, {
+          parse_mode: "HTML",
+        });
+        sent++;
+      } catch (err: any) {
+        failed++;
+        // Bloklagan foydalanuvchini deactivate qilamiz
+        if (err?.code === 403) {
+          await prisma.user.update({
+            where: { telegramId: user.telegramId },
+            data:  { isActive: false },
+          }).catch(() => {});
+        }
+      }
+      // Rate limit: 30 msg/sec dan oshmaslik uchun
+      await new Promise((res) => setTimeout(res, 50));
+    }
+
+    await ctx.reply(
+      `✅ <b>Broadcast tugadi!</b>\n\n` +
+      `📬 Yuborildi:    <b>${sent}</b>\n` +
+      `❌ Xato/blok:   <b>${failed}</b>`,
       { parse_mode: "HTML" },
     );
   });
 }
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
 
 async function sendAdminStats(ctx: any, edit = false): Promise<void> {
   const now   = new Date();
@@ -60,7 +133,6 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
     prisma.filter.count(),
   ]);
 
-  // Eng ko'p vakansiya joylagan kanallar
   const topChannels = await prisma.vacancy.groupBy({
     by:      ["channel"],
     _count:  { id: true },
@@ -68,33 +140,33 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
     take:    5,
   });
 
-  const channelLines = topChannels
-    .map((c, i) => `   ${i + 1}. @${c.channel} — ${c._count.id} ta`)
-    .join("\n");
+  const channelLines = topChannels.length
+    ? topChannels.map((c, i) => `   ${i + 1}. @${c.channel} — ${c._count.id} ta`).join("\n")
+    : "   (hali ma'lumot yo'q)";
 
   const text =
     `🛠 <b>Admin Panel — IshTopperBot</b>\n` +
     `<i>${now.toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent" })}</i>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
     `👥 <b>Foydalanuvchilar:</b>\n` +
-    `   Jami:           <b>${totalUsers}</b>\n` +
-    `   Faol:           <b>${activeUsers}</b>  (pauza: ${totalUsers - activeUsers})\n` +
+    `   Jami:            <b>${totalUsers}</b>\n` +
+    `   Faol:            <b>${activeUsers}</b>  (pauza: ${totalUsers - activeUsers})\n` +
     `   Bugun qo'shildi: <b>${newUsersToday}</b>\n\n` +
     `📋 <b>Filterlar:</b>\n` +
-    `   Jami:           <b>${totalFilters}</b>  (o'rtacha ${(totalFilters / Math.max(activeUsers, 1)).toFixed(1)} ta/user)\n\n` +
+    `   Jami:            <b>${totalFilters}</b>  (~${(totalFilters / Math.max(activeUsers, 1)).toFixed(1)} ta/user)\n\n` +
     `💼 <b>Vakansiyalar:</b>\n` +
-    `   Jami:           <b>${totalVacancies.toLocaleString("ru")}</b>\n` +
-    `   Bu hafta:       <b>${vacanciesThisWeek}</b>\n` +
-    `   Bu oy:          <b>${vacanciesThisMonth}</b>\n\n` +
+    `   Jami:            <b>${totalVacancies.toLocaleString("ru")}</b>\n` +
+    `   Bu hafta:        <b>${vacanciesThisWeek}</b>\n` +
+    `   Bu oy:           <b>${vacanciesThisMonth}</b>\n\n` +
     `📬 <b>Bildirishnomalar:</b>\n` +
-    `   Jami:           <b>${totalNotifs.toLocaleString("ru")}</b>\n` +
-    `   Bugun:          <b>${notifsToday}</b>\n\n` +
-    `📡 <b>Top kanallar (all-time):</b>\n` +
+    `   Jami:            <b>${totalNotifs.toLocaleString("ru")}</b>\n` +
+    `   Bugun:           <b>${notifsToday}</b>\n\n` +
+    `📡 <b>Top kanallar:</b>\n` +
     channelLines;
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🔄 Yangilash", "admin_refresh")],
-    [Markup.button.callback("📢 Broadcast", "admin_broadcast_start")],
+    [Markup.button.callback("📢 Broadcast yuborish", "admin_broadcast_start")],
   ]);
 
   if (edit) {
