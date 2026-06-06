@@ -1,5 +1,5 @@
 import { Telegraf } from "telegraf";
-import * as dotenv from "dotenv";
+import { config } from "../../config";
 import { logger } from "../../lib/logger";
 import { createSessionStore } from "./session";
 import { registerStartHandler } from "./handlers/start.handler";
@@ -9,37 +9,29 @@ import { registerStatsHandler } from "./handlers/stats.handler";
 import { registerSettingsHandler } from "./handlers/settings.handler";
 import { registerAdminHandler } from "./handlers/admin.handler";
 
-dotenv.config();
-
 const CTX = "Bot";
 
-if (!process.env.BOT_TOKEN) {
-  throw new Error("BOT_TOKEN environment variable kerak!");
-}
-
-export const bot = new Telegraf(process.env.BOT_TOKEN);
+export const bot = new Telegraf(config.botToken);
 const sessions = createSessionStore();
 
-// ─── Handlerlarni tartib bilan ro'yxatdan o'tkazamiz ─────────────────────────
+// Handlerlar tartib bilan ro'yxatdan o'tadi (tartib muhim!)
 registerStartHandler(bot);
 registerStatsHandler(bot, sessions);
 registerSettingsHandler(bot, sessions);
 registerFilterHandlers(bot, sessions);
-registerAdminHandler(bot);
-registerMessageHandler(bot, sessions);   // OXIRIDA — fallback handler
+registerAdminHandler(bot);        // Admin handler OXIRIGA yaqin — text handler bor
+registerMessageHandler(bot, sessions); // Fallback — ENG OXIRIDA
 
-// ─── Global error handler ─────────────────────────────────────────────────────
+// Global xato ushlagich
 bot.catch((err: any, ctx) => {
-  logger.error(CTX, `Update xatosi: ${err?.message ?? String(err)}`, {
+  logger.error(CTX, `Update xatosi`, {
+    error:      err?.message ?? String(err),
     updateType: ctx.updateType,
-    user:       ctx.from?.id,
+    userId:     ctx.from?.id,
   });
 });
 
 export async function startBot(): Promise<void> {
   await bot.launch({ dropPendingUpdates: true });
   logger.info(CTX, `✅ Bot ishga tushdi: @${bot.botInfo?.username}`);
-
-  process.once("SIGINT",  () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
 }

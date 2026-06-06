@@ -1,157 +1,168 @@
 import { Telegraf, Markup } from "telegraf";
 import { prisma } from "../../../lib/prisma";
-import { escapeHtml } from "../utils";
+import { escapeHtml, formatDate, sleep } from "../utils";
+import { config } from "../../../config";
+import { bot } from "../index";
 
-const ADMIN_IDS = (process.env.ADMIN_IDS ?? "")
-  .split(",")
-  .map((s) => parseInt(s.trim()))
-  .filter((n) => !isNaN(n));
+const PAGE_SIZE = 10;
 
-function isAdmin(id: number): boolean {
-  return ADMIN_IDS.includes(id);
-}
-
-// Broadcast kutayotgan adminlar
+// Broadcast kutayotgan adminlar (in-memory, restart da tozalanadi)
 const broadcastPending = new Set<number>();
 
-export function registerAdminHandler(bot: Telegraf) {
+function isAdmin(id: number): boolean {
+  return config.adminIds.includes(id);
+}
+
+export function registerAdminHandler(telegraf: Telegraf) {
 
   // ── /admin ────────────────────────────────────────────────────────────────
-  bot.command("admin", async (ctx) => {
+  telegraf.command("admin", async (ctx) => {
     if (!isAdmin(ctx.from.id)) { await ctx.reply("❌ Ruxsat yo'q."); return; }
-    await sendAdminStats(ctx);
+    await sendAdminStats(ctx, false);
   });
 
   // ── Yangilash ─────────────────────────────────────────────────────────────
-  bot.action("admin_refresh", async (ctx) => {
+  telegraf.action("admin_refresh", async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
     await ctx.answerCbQuery("🔄 Yangilanmoqda...");
     await sendAdminStats(ctx, true);
   });
 
   // ── Foydalanuvchilar ro'yxati ─────────────────────────────────────────────
-  bot.action(/^admin_users:(\d+)$/, async (ctx) => {
+  telegraf.action(/^admin_users:(\d+)$/, async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
     await ctx.answerCbQuery();
-    const page = parseInt(ctx.match[1]);
-    await sendUserList(ctx, page, true);
+    await sendUserList(ctx, parseInt(ctx.match[1]), true);
   });
 
-  bot.command("users", async (ctx) => {
+  telegraf.command("users", async (ctx) => {
     if (!isAdmin(ctx.from.id)) { await ctx.reply("❌ Ruxsat yo'q."); return; }
     await sendUserList(ctx, 0, false);
   });
 
   // ── Broadcast boshlash ────────────────────────────────────────────────────
-  bot.action("admin_broadcast_start", async (ctx) => {
+  telegraf.action("admin_broadcast_start", async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
     await ctx.answerCbQuery();
     broadcastPending.add(ctx.from!.id);
     await ctx.reply(
       `📢 <b>Broadcast</b>\n\n` +
       `Barcha faol foydalanuvchilarga yuboriladigan xabarni yozing.\n\n` +
-      `✅ HTML teglari ishlaydi: <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>\n\n` +
+      `<b>HTML teglari qo'llab-quvvatlanadi:</b>\n` +
+      `<code>&lt;b&gt;bold&lt;/b&gt;</code>  <code>&lt;i&gt;italic&lt;/i&gt;</code>  <code>&lt;code&gt;code&lt;/code&gt;</code>\n\n` +
       `/cancel — bekor qilish`,
       { parse_mode: "HTML" },
     );
   });
 
   // ── /cancel ───────────────────────────────────────────────────────────────
-  bot.command("cancel", async (ctx) => {
-    if (broadcastPending.has(ctx.from.id)) {
-      broadcastPending.delete(ctx.from.id);
-      await ctx.reply("❌ Broadcast bekor qilindi.", Markup.removeKeyboard());
+  telegraf.command("cancel", async (ctx) => {
+    if (broadcastPending.delete(ctx.from.id)) {
+      await ctx.reply("❌ Broadcast bekor qilindi.");
     }
   });
 
-  // ── Broadcast xabarini ushlab yuborish ────────────────────────────────────
-  bot.on("text", async (ctx, next) => {
+  // ── Broadcast text handler (ADMIN uchun) ──────────────────────────────────
+  // Eslatma: bu handler bot.on("text") sifatida ADMIN UCHUN ONLY ishlaydi.
+  // message.handler.ts dagi fallback handler admin bo'lmagan userlar uchun.
+  telegraf.on("text", async (ctx, next) => {
     const userId = ctx.from.id;
     if (!isAdmin(userId) || !broadcastPending.has(userId)) {
-      return next(); // admin emas yoki broadcast kutmayapti — o'tkazamiz
+      return next();
     }
-
     broadcastPending.delete(userId);
-    const messageText = ctx.message.text;
 
+    const messageText = ctx.message.text;
     if (messageText === "/cancel") {
-      await ctx.reply("❌ Broadcast bekor qilindi.");
+      await ctx.reply("❌ Bekor qilindi.");
       return;
     }
 
-    // Faol foydalanuvchilar ro'yxati
-    const users = await prisma.user.findMany({
-      where:  { isActive: true },
-      select: { telegramId: true },
-    });
-
-    await ctx.reply(
-      `📢 <b>Broadcast boshlanmoqda...</b>\n` +
-      `👥 ${users.length} ta foydalanuvchiga yuboriladi`,
-      { parse_mode: "HTML" },
-    );
-
-    let sent = 0, failed = 0;
-
-    for (const user of users) {
-      try {
-        await bot.telegram.sendMessage(user.telegramId.toString(), messageText, {
-          parse_mode: "HTML",
-        });
-        sent++;
-      } catch (err: any) {
-        failed++;
-        // Bloklagan foydalanuvchini deactivate qilamiz
-        if (err?.code === 403) {
-          await prisma.user.update({
-            where: { telegramId: user.telegramId },
-            data:  { isActive: false },
-          }).catch(() => {});
-        }
-      }
-      // Rate limit: 30 msg/sec dan oshmaslik uchun
-      await new Promise((res) => setTimeout(res, 50));
-    }
-
-    await ctx.reply(
-      `✅ <b>Broadcast tugadi!</b>\n\n` +
-      `📬 Yuborildi:    <b>${sent}</b>\n` +
-      `❌ Xato/blok:   <b>${failed}</b>`,
-      { parse_mode: "HTML" },
-    );
+    await runBroadcast(ctx, messageText);
   });
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
+// ─── Broadcast logikasi ───────────────────────────────────────────────────────
+async function runBroadcast(ctx: any, text: string): Promise<void> {
+  const users = await prisma.user.findMany({
+    where:  { isActive: true },
+    select: { telegramId: true },
+  });
 
-async function sendAdminStats(ctx: any, edit = false): Promise<void> {
+  const progressMsg = await ctx.reply(
+    `📢 <b>Broadcast boshlanmoqda...</b>\n👥 ${users.length} ta foydalanuvchi`,
+    { parse_mode: "HTML" },
+  );
+
+  let sent = 0, failed = 0, blocked = 0;
+  const startTime = Date.now();
+
+  for (const user of users) {
+    try {
+      await bot.telegram.sendMessage(user.telegramId.toString(), text, { parse_mode: "HTML" });
+      sent++;
+    } catch (err: any) {
+      if (err?.code === 403) {
+        blocked++;
+        // Bloklagan userlarni deactivate qilamiz
+        await prisma.user.update({
+          where: { telegramId: user.telegramId },
+          data:  { isActive: false },
+        }).catch(() => {});
+      } else if (err?.code === 429) {
+        await sleep((err?.parameters?.retry_after ?? 10) * 1000);
+        // Qayta urinish
+        try {
+          await bot.telegram.sendMessage(user.telegramId.toString(), text, { parse_mode: "HTML" });
+          sent++;
+        } catch { failed++; }
+      } else {
+        failed++;
+      }
+    }
+    await sleep(50); // 20 msg/sec
+  }
+
+  const elapsed = Math.round((Date.now() - startTime) / 1000);
+  await ctx.reply(
+    `✅ <b>Broadcast tugadi!</b>  (${elapsed} son)\n\n` +
+    `📬 Yuborildi:   <b>${sent}</b>\n` +
+    `⛔ Bloklagan:   <b>${blocked}</b>\n` +
+    `❌ Xato:        <b>${failed}</b>`,
+    { parse_mode: "HTML" },
+  );
+}
+
+// ─── Admin statistika ─────────────────────────────────────────────────────────
+async function sendAdminStats(ctx: any, edit: boolean): Promise<void> {
   const now   = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const week  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const month = new Date(now.getFullYear(), now.getMonth(), 1);
 
   const [
     totalUsers, activeUsers, newUsersToday,
     totalVacancies, vacanciesThisWeek, vacanciesThisMonth,
     totalNotifs, notifsToday,
     totalFilters,
+    topChannels,
   ] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { isActive: true } }),
     prisma.user.count({ where: { createdAt: { gte: today } } }),
     prisma.vacancy.count(),
     prisma.vacancy.count({ where: { createdAt: { gte: week } } }),
-    prisma.vacancy.count({ where: { createdAt: { gte: new Date(now.getFullYear(), now.getMonth(), 1) } } }),
+    prisma.vacancy.count({ where: { createdAt: { gte: month } } }),
     prisma.notification.count(),
     prisma.notification.count({ where: { sentAt: { gte: today } } }),
     prisma.filter.count(),
+    prisma.vacancy.groupBy({
+      by:      ["channel"],
+      _count:  { id: true },
+      orderBy: { _count: { id: "desc" } },
+      take:    5,
+    }),
   ]);
-
-  const topChannels = await prisma.vacancy.groupBy({
-    by:      ["channel"],
-    _count:  { id: true },
-    orderBy: { _count: { id: "desc" } },
-    take:    5,
-  });
 
   const channelLines = topChannels.length
     ? topChannels.map((c, i) => `   ${i + 1}. @${c.channel} — ${c._count.id} ta`).join("\n")
@@ -159,7 +170,7 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
 
   const text =
     `🛠 <b>Admin Panel — IshTopperBot</b>\n` +
-    `<i>${now.toLocaleString("uz-UZ", { timeZone: "Asia/Tashkent" })}</i>\n` +
+    `<i>${formatDate(now)}</i>\n` +
     `━━━━━━━━━━━━━━━━━━━━\n\n` +
     `👥 <b>Foydalanuvchilar:</b>\n` +
     `   Jami:            <b>${totalUsers}</b>\n` +
@@ -174,13 +185,12 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
     `📬 <b>Bildirishnomalar:</b>\n` +
     `   Jami:            <b>${totalNotifs.toLocaleString("ru")}</b>\n` +
     `   Bugun:           <b>${notifsToday}</b>\n\n` +
-    `📡 <b>Top kanallar:</b>\n` +
-    channelLines;
+    `📡 <b>Top kanallar:</b>\n${channelLines}`;
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🔄 Yangilash", "admin_refresh")],
-    [Markup.button.callback("👥 Foydalanuvchilar ro'yxati", "admin_users:0")],
-    [Markup.button.callback("📢 Broadcast yuborish", "admin_broadcast_start")],
+    [Markup.button.callback("👥 Foydalanuvchilar", "admin_users:0")],
+    [Markup.button.callback("📢 Broadcast", "admin_broadcast_start")],
   ]);
 
   if (edit) {
@@ -191,21 +201,16 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
 }
 
 // ─── Foydalanuvchilar ro'yxati ────────────────────────────────────────────────
-
-const PAGE_SIZE = 10;
-
 async function sendUserList(ctx: any, page: number, edit: boolean): Promise<void> {
   const totalUsers = await prisma.user.count();
-  const totalPages = Math.ceil(totalUsers / PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(totalUsers / PAGE_SIZE));
   const safePage   = Math.max(0, Math.min(page, totalPages - 1));
 
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     skip:    safePage * PAGE_SIZE,
     take:    PAGE_SIZE,
-    include: {
-      _count: { select: { filters: true, notifications: true } },
-    },
+    include: { _count: { select: { filters: true, notifications: true } } },
   });
 
   if (!users.length) {
@@ -214,34 +219,34 @@ async function sendUserList(ctx: any, page: number, edit: boolean): Promise<void
   }
 
   const lines: string[] = [
-    `👥 <b>Foydalanuvchilar</b>  (${safePage + 1}/${totalPages} bet, jami: ${totalUsers})\n━━━━━━━━━━━━━━━━━━━━\n`,
+    `👥 <b>Foydalanuvchilar</b>  (${safePage + 1}/${totalPages} bet · jami: ${totalUsers})\n━━━━━━━━━━━━━━━━━━━━\n`,
   ];
 
   for (const u of users) {
-    const name    = escapeHtml(u.firstName ?? u.username ?? "Noma'lum");
-    const uname   = u.username ? ` @${escapeHtml(u.username)}` : "";
-    const status  = u.isActive ? "🟢" : "⏸";
-    const joined  = u.createdAt.toLocaleDateString("uz-UZ", { timeZone: "Asia/Tashkent" });
+    const name   = escapeHtml(u.firstName ?? u.username ?? "Noma'lum");
+    const uname  = u.username ? ` @${u.username}` : "";
+    const status = u.isActive ? "🟢" : "⏸";
+    const silent = u.silentFrom != null
+      ? `  🌙 ${u.silentFrom}:00–${u.silentTo}:00`
+      : "";
 
     lines.push(
-      `${status} <b>${name}</b>${uname}\n` +
-      `   ID: <code>${u.telegramId}</code>\n` +
-      `   📋 ${u._count.filters} filtr  ·  📬 ${u._count.notifications} bildirishnoma\n` +
-      `   📅 ${joined}`,
+      `${status} <b>${name}</b>${escapeHtml(uname)}${silent}\n` +
+      `   <code>${u.telegramId}</code>  ·  📋 ${u._count.filters}  ·  📬 ${u._count.notifications}\n` +
+      `   📅 ${formatDate(u.createdAt)}`,
     );
   }
 
-  const navButtons: ReturnType<typeof Markup.button.callback>[] = [];
-  if (safePage > 0)              navButtons.push(Markup.button.callback("◀️ Oldingi", `admin_users:${safePage - 1}`));
-  if (safePage < totalPages - 1) navButtons.push(Markup.button.callback("Keyingi ▶️", `admin_users:${safePage + 1}`));
+  const nav: ReturnType<typeof Markup.button.callback>[] = [];
+  if (safePage > 0)              nav.push(Markup.button.callback("◀️", `admin_users:${safePage - 1}`));
+  if (safePage < totalPages - 1) nav.push(Markup.button.callback("▶️", `admin_users:${safePage + 1}`));
 
   const keyboard = Markup.inlineKeyboard([
-    navButtons,
+    ...(nav.length ? [nav] : []),
     [Markup.button.callback("🔙 Admin panel", "admin_refresh")],
-  ].filter((row) => row.length > 0));
+  ]);
 
   const text = lines.join("\n");
-
   if (edit) {
     await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
   } else {

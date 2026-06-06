@@ -1,18 +1,33 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
-import * as dotenv from "dotenv";
 
-dotenv.config();
+// Singleton — butun app davomida bitta instance
+let _prisma: PrismaClient | null = null;
 
-// Singleton — butun app bo'yicha bitta instance
-const adapter = new PrismaPg({
-  connectionString: process.env.DATABASE_URL!,
-});
+function createPrisma(): PrismaClient {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL environment variable kerak");
 
-export const prisma = new PrismaClient({
-  adapter,
-  log:
-    process.env.NODE_ENV === "development"
-      ? ["query", "warn", "error"]
+  const adapter = new PrismaPg({ connectionString: url });
+
+  return new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development"
+      ? [{ emit: "stdout", level: "query" }, "warn", "error"]
       : ["warn", "error"],
-});
+  });
+}
+
+export function getPrisma(): PrismaClient {
+  if (!_prisma) _prisma = createPrisma();
+  return _prisma;
+}
+
+export const prisma = getPrisma();
+
+export async function disconnectPrisma(): Promise<void> {
+  if (_prisma) {
+    await _prisma.$disconnect();
+    _prisma = null;
+  }
+}

@@ -1,20 +1,17 @@
 import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions";
 import * as input from "input";
-import * as dotenv from "dotenv";
 import { NewMessage, NewMessageEvent } from "telegram/events";
-import { Api } from "telegram";
 import { prisma } from "../../lib/prisma";
 import { logger } from "../../lib/logger";
+import { config } from "../../config";
 import { parseVacancy } from "./vacancy.parser";
 import { isSpam } from "./spam.filter";
 import { matchAndNotify } from "../matcher";
 
-dotenv.config();
-
 const CTX = "Parser";
 
-// ─── Kanallar ro'yxati ────────────────────────────────────────────────────────
+// ─── Kuzatiladigan kanallar ───────────────────────────────────────────────────
 const CHANNELS = [
   "UstozShogird",
   "vakansiyalar_uz_uz",
@@ -47,51 +44,32 @@ const CHANNELS = [
   "frontendVacancy",
 ] as const;
 
-// ─── Client ───────────────────────────────────────────────────────────────────
-
-function createClient(): TelegramClient {
-  const apiId = Number(process.env.API_ID);
-  const apiHash = process.env.API_HASH!;
-  if (!apiId || !apiHash) throw new Error("API_ID va API_HASH kerak");
-
-  const session = new StringSession(process.env.SESSION_STRING ?? "");
-  return new TelegramClient(session, apiId, apiHash, {
-    connectionRetries: 10,
-    retryDelay: 3000,
-    autoReconnect: true,
-    // Uzilganda qayta ulashga harakat qiladi
-  });
-}
-
 // ─── Channel name cache ───────────────────────────────────────────────────────
-const channelCache = new Map<string, string>(); // peerId → channelName
+const channelCache = new Map<string, string>();
 
-async function resolveChannelName(
-  message: NewMessageEvent["message"],
-): Promise<string> {
+async function resolveChannelName(message: NewMessageEvent["message"]): Promise<string> {
   try {
     const chat = await message.getChat();
     if (!chat) return "unknown";
 
-    const key = chat.className + String((chat as any).id ?? "");
+    const key = String((chat as any).id ?? "");
     if (channelCache.has(key)) return channelCache.get(key)!;
 
     let name = "unknown";
     if ("username" in chat && (chat as any).username) {
       name = (chat as any).username as string;
     } else if ("title" in chat && (chat as any).title) {
-      name = (chat as any).title as string;
+      name = ((chat as any).title as string).replace(/\s+/g, "_");
     }
 
-    channelCache.set(key, name);
+    if (key) channelCache.set(key, name);
     return name;
   } catch {
     return "unknown";
   }
 }
 
-// ─── Save & notify ────────────────────────────────────────────────────────────
-
+// ─── Xabar qayta ishlash ──────────────────────────────────────────────────────
 async function processMessage(
   message: NewMessageEvent["message"],
   channelName: string,
@@ -99,19 +77,14 @@ async function processMessage(
   const text = message.text?.trim() ?? "";
   if (!text || text.length < 15) return;
 
-  // Spam tekshiruvi
   if (isSpam(text)) {
-    logger.debug(CTX, `Spam — ${channelName}`);
+    logger.debug(CTX, `Spam — @${channelName}`);
     return;
   }
 
-  const messageId  = BigInt(message.id);
-  const messageLink =
-    channelName !== "unknown"
-      ? `https://t.me/${channelName}/${message.id}`
-      : null;
+  const messageId = BigInt(message.id);
 
-  // Duplicate
+  // Duplicate tekshiruvi
   const exists = await prisma.vacancy.findUnique({
     where:  { messageId },
     select: { id: true },
@@ -121,92 +94,74 @@ async function processMessage(
   // Parse
   const parsed = parseVacancy(text, channelName);
   if (!parsed) {
-    logger.debug(CTX, `Score past — ${channelName} | ${text.slice(0, 60)}`);
+    logger.debug(CTX, `Score past — @${channelName} | "${text.slice(0, 50)}..."`);
     return;
   }
 
-  logger.info(CTX, `✅ Yangi vakansiya`, {
+  const messageLink =
+    channelName !== "unknown"
+      ? `https://t.me/${channelName}/${message.id}`
+      : null;
+
+  logger.info(CTX, `✅ Yangi ${parsed.jobType}`, {
     channel:  channelName,
-    title:    parsed.title ?? "(title yo'q)",
+    title:    parsed.title ?? "(yo'q)",
     level:    parsed.level,
     workType: parsed.workType,
     techs:    parsed.technologies.slice(0, 5),
-    link:     messageLink,
   });
 
-  const vacancy = await prisma.vacancy.create({
-    data: {
-      text,
-      channel:         channelName,
-      messageId,
-      messageLink,
-      title:           parsed.title,
-      company:         parsed.company,
-      location:        parsed.location,
-      salary:          parsed.salary,
-      salaryMin:       parsed.salaryMin,
-      salaryMax:       parsed.salaryMax,
-      technologies:    parsed.technologies,
-      telegramContact: parsed.telegramContact,
-      phone:           parsed.phone,
-      workType:        parsed.workType,
-      level:           parsed.level,
-      jobType:         parsed.jobType,
-    },
-  });
+  try {
+    const vacancy = await prisma.vacancy.create({
+      data: {
+        text,
+        channel:         channelName,
+        messageId,
+        messageLink,
+        title:           parsed.title,
+        company:         parsed.company,
+        location:        parsed.location,
+        salary:          parsed.salary,
+        salaryMin:       parsed.salaryMin,
+        salaryMax:       parsed.salaryMax,
+        technologies:    parsed.technologies,
+        telegramContact: parsed.telegramContact,
+        phone:           parsed.phone,
+        workType:        parsed.workType,
+        level:           parsed.level,
+        jobType:         parsed.jobType,
+      },
+    });
 
-  await matchAndNotify(vacancy.id);
+    await matchAndNotify(vacancy.id);
+  } catch (err: any) {
+    // messageId unique constraint — bu xabar allaqachon saqlangan
+    if (err?.code === "P2002") return;
+    logger.error(CTX, "DB saqlashda xato", { error: err?.message });
+  }
 }
 
 // ─── Event handler ────────────────────────────────────────────────────────────
-
-async function handleNewMessage(
-  event: NewMessageEvent,
-  _client: TelegramClient,
-): Promise<void> {
+async function handleNewMessage(event: NewMessageEvent): Promise<void> {
   try {
-    const message     = event.message;
-    const channelName = await resolveChannelName(message);
-    await processMessage(message, channelName);
+    const channelName = await resolveChannelName(event.message);
+    await processMessage(event.message, channelName);
   } catch (err: any) {
-    // Bitta xabar xatosi butun streamni to'xtatmasin
     logger.error(CTX, "handleNewMessage xato", { error: err?.message ?? String(err) });
   }
 }
 
-// ─── Connection watchdog ──────────────────────────────────────────────────────
-
-async function startWithReconnect(client: TelegramClient): Promise<void> {
-  const chats = CHANNELS.map((ch) => `@${ch}`);
-
-  const addHandlers = () => {
-    client.addEventHandler(
-      (event: NewMessageEvent) => handleNewMessage(event, client),
-      new NewMessage({ chats }),
-    );
-    logger.info(CTX, `✅ Parser tayyor — ${CHANNELS.length} kanal kuzatilmoqda`);
-  };
-
-  // Birinchi ulanish
-  addHandlers();
-
-  // Har 5 daqiqada ulanish holatini tekshirish
-  setInterval(async () => {
-    try {
-      if (!client.connected) {
-        logger.warn(CTX, "Ulanish uzildi — qayta ulanmoqda...");
-        await client.connect();
-        addHandlers();
-        logger.info(CTX, "✅ Qayta ulandi");
-      }
-    } catch (err: any) {
-      logger.error(CTX, "Reconnect xato", { error: err?.message });
-    }
-  }, 5 * 60 * 1000);
+// ─── Client yaratish ──────────────────────────────────────────────────────────
+function createClient(): TelegramClient {
+  const session = new StringSession(config.sessionString);
+  return new TelegramClient(session, config.apiId, config.apiHash, {
+    connectionRetries: 10,
+    retryDelay:        3000,
+    autoReconnect:     true,
+  });
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-
 export async function startParser(): Promise<void> {
   const client = createClient();
 
@@ -217,10 +172,34 @@ export async function startParser(): Promise<void> {
     onError:     (err) => logger.error(CTX, "Auth xato", { error: err.message }),
   });
 
+  // Birinchi marta session string logga chiqariladi
   const savedSession = client.session.save() as unknown as string;
-  if (savedSession && !process.env.SESSION_STRING) {
-    logger.info(CTX, `SESSION_STRING="${savedSession}"`);
+  if (savedSession && !config.sessionString) {
+    logger.info(CTX, `SESSION_STRING ni .env ga qo'ying:\nSESSION_STRING="${savedSession}"`);
   }
 
-  await startWithReconnect(client);
+  const chats = CHANNELS.map((ch) => `@${ch}`);
+
+  // MUHIM: handler faqat BIR MARTA qo'shiladi
+  // Reconnect bo'lganda TelegramClient avtomatik qayta ulanadi (autoReconnect: true)
+  // addEventHandler qayta chaqirilmaydi — duplicate handler muammosinining oldini oladi
+  client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
+
+  logger.info(CTX, `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`, {
+    channels: CHANNELS,
+  });
+
+  // Ulanish monitoringi — 5 daqiqada bir tekshirish
+  setInterval(async () => {
+    try {
+      if (!client.connected) {
+        logger.warn(CTX, "Ulanish yo'q — qayta ulanmoqda...");
+        await client.connect();
+        logger.info(CTX, "✅ Qayta ulandi");
+        // addEventHandler CHAQIRILMAYDI — mavjud handler saqlanadi
+      }
+    } catch (err: any) {
+      logger.error(CTX, "Reconnect xato", { error: err?.message });
+    }
+  }, 5 * 60 * 1000);
 }
