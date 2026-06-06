@@ -29,6 +29,19 @@ export function registerAdminHandler(bot: Telegraf) {
     await sendAdminStats(ctx, true);
   });
 
+  // ── Foydalanuvchilar ro'yxati ─────────────────────────────────────────────
+  bot.action(/^admin_users:(\d+)$/, async (ctx) => {
+    if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
+    await ctx.answerCbQuery();
+    const page = parseInt(ctx.match[1]);
+    await sendUserList(ctx, page, true);
+  });
+
+  bot.command("users", async (ctx) => {
+    if (!isAdmin(ctx.from.id)) { await ctx.reply("❌ Ruxsat yo'q."); return; }
+    await sendUserList(ctx, 0, false);
+  });
+
   // ── Broadcast boshlash ────────────────────────────────────────────────────
   bot.action("admin_broadcast_start", async (ctx) => {
     if (!isAdmin(ctx.from!.id)) { await ctx.answerCbQuery("❌"); return; }
@@ -166,8 +179,68 @@ async function sendAdminStats(ctx: any, edit = false): Promise<void> {
 
   const keyboard = Markup.inlineKeyboard([
     [Markup.button.callback("🔄 Yangilash", "admin_refresh")],
+    [Markup.button.callback("👥 Foydalanuvchilar ro'yxati", "admin_users:0")],
     [Markup.button.callback("📢 Broadcast yuborish", "admin_broadcast_start")],
   ]);
+
+  if (edit) {
+    await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
+  } else {
+    await ctx.reply(text, { parse_mode: "HTML", ...keyboard });
+  }
+}
+
+// ─── Foydalanuvchilar ro'yxati ────────────────────────────────────────────────
+
+const PAGE_SIZE = 10;
+
+async function sendUserList(ctx: any, page: number, edit: boolean): Promise<void> {
+  const totalUsers = await prisma.user.count();
+  const totalPages = Math.ceil(totalUsers / PAGE_SIZE);
+  const safePage   = Math.max(0, Math.min(page, totalPages - 1));
+
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+    skip:    safePage * PAGE_SIZE,
+    take:    PAGE_SIZE,
+    include: {
+      _count: { select: { filters: true, notifications: true } },
+    },
+  });
+
+  if (!users.length) {
+    await ctx.reply("👥 Foydalanuvchilar yo'q.");
+    return;
+  }
+
+  const lines: string[] = [
+    `👥 <b>Foydalanuvchilar</b>  (${safePage + 1}/${totalPages} bet, jami: ${totalUsers})\n━━━━━━━━━━━━━━━━━━━━\n`,
+  ];
+
+  for (const u of users) {
+    const name    = escapeHtml(u.firstName ?? u.username ?? "Noma'lum");
+    const uname   = u.username ? ` @${escapeHtml(u.username)}` : "";
+    const status  = u.isActive ? "🟢" : "⏸";
+    const joined  = u.createdAt.toLocaleDateString("uz-UZ", { timeZone: "Asia/Tashkent" });
+
+    lines.push(
+      `${status} <b>${name}</b>${uname}\n` +
+      `   ID: <code>${u.telegramId}</code>\n` +
+      `   📋 ${u._count.filters} filtr  ·  📬 ${u._count.notifications} bildirishnoma\n` +
+      `   📅 ${joined}`,
+    );
+  }
+
+  const navButtons: ReturnType<typeof Markup.button.callback>[] = [];
+  if (safePage > 0)              navButtons.push(Markup.button.callback("◀️ Oldingi", `admin_users:${safePage - 1}`));
+  if (safePage < totalPages - 1) navButtons.push(Markup.button.callback("Keyingi ▶️", `admin_users:${safePage + 1}`));
+
+  const keyboard = Markup.inlineKeyboard([
+    navButtons,
+    [Markup.button.callback("🔙 Admin panel", "admin_refresh")],
+  ].filter((row) => row.length > 0));
+
+  const text = lines.join("\n");
 
   if (edit) {
     await ctx.editMessageText(text, { parse_mode: "HTML", ...keyboard }).catch(() => {});
