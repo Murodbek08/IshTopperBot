@@ -3,7 +3,7 @@
  * Start vaqtida validate qilinadi, aniq xato beriladi.
  */
 
-function require(key: string): string {
+function requireEnv(key: string): string {
   const val = process.env[key];
   if (!val || val.trim() === "") {
     throw new Error(`❌ Muhim environment variable yo'q: ${key}\n.env fayliga qo'shing.`);
@@ -11,7 +11,7 @@ function require(key: string): string {
   return val.trim();
 }
 
-function optional(key: string, defaultVal = ""): string {
+function optionalEnv(key: string, defaultVal = ""): string {
   return (process.env[key] ?? defaultVal).trim();
 }
 
@@ -23,24 +23,15 @@ function optionalInt(key: string, defaultVal: number): number {
 }
 
 export const config = {
-  // Telegram Bot
-  botToken:      require("BOT_TOKEN"),
-
-  // MTProto Parser
-  apiId:         parseInt(require("API_ID"), 10),
-  apiHash:       require("API_HASH"),
-  sessionString: optional("SESSION_STRING"),
-
-  // Database
-  databaseUrl:   require("DATABASE_URL"),
-
-  // App
-  nodeEnv:       optional("NODE_ENV", "production"),
+  botToken:      requireEnv("BOT_TOKEN"),
+  apiId:         parseInt(requireEnv("API_ID"), 10),
+  apiHash:       requireEnv("API_HASH"),
+  sessionString: optionalEnv("SESSION_STRING"),
+  databaseUrl:   requireEnv("DATABASE_URL"),
+  nodeEnv:       optionalEnv("NODE_ENV", "production"),
   port:          optionalInt("PORT", 3000),
-  renderUrl:     optional("RENDER_URL"),          // agar Render.com ishlatilsa
-
-  // Admin
-  adminIds: optional("ADMIN_IDS")
+  renderUrl:     optionalEnv("RENDER_URL"),
+  adminIds:      optionalEnv("ADMIN_IDS")
     .split(",")
     .map((s) => parseInt(s.trim(), 10))
     .filter((n) => !isNaN(n) && n > 0),
