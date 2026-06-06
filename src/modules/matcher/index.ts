@@ -2,13 +2,17 @@ import { prisma } from "../../lib/prisma";
 import { logger } from "../../lib/logger";
 import { escapeHtml } from "../bot/utils";
 import { bot } from "../bot";
-import type { Vacancy, Filter } from "@prisma/client";
+import type { Vacancy } from "@prisma/client";
 import { WORK_TYPES, LEVELS, LOCATIONS } from "../bot/filter-data";
 import { Markup } from "telegraf";
 
 const CTX = "Matcher";
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function scoreMatch(
   vacancy: Vacancy,
@@ -20,21 +24,19 @@ function scoreMatch(
     level?:    string | null;
   },
 ): number {
-  const textLower = vacancy.text.toLowerCase();
+  const textLower = (vacancy.text + " " + (vacancy.title ?? "") + " " + (vacancy.technologies ?? []).join(" ")).toLowerCase();
   let score = 0;
 
-  // ── 1. Keyword matching (MANDATORY — kamida 1 ta mos kelishi kerak) ─────
+  // ── 1. Keyword (MAJBURIY — kamida 1 ta mos) ──────────────────────────────
   let hits = 0;
   for (const kw of filter.keywords) {
-    const re = new RegExp(
-      `(?<![a-z0-9])${escapeRegex(kw.toLowerCase())}(?![a-z0-9])`,
-    );
+    const re = new RegExp(`(?<![a-z0-9])${escapeRegex(kw)}(?![a-z0-9])`, "i");
     if (re.test(textLower)) hits++;
   }
   if (hits === 0) return 0;
-  score += hits * 10;
+  score += Math.min(hits, 5) * 10; // max 50 ball keyword'dan
 
-  // Parsed texnologiyalar bilan ham solishtiramiz (bonus)
+  // Parsed texnologiyalar bonus
   const parsedTechs = (vacancy.technologies ?? []).map((t) => t.toLowerCase());
   for (const kw of filter.keywords) {
     if (parsedTechs.some((pt) => pt.includes(kw) || kw.includes(pt))) {
@@ -42,221 +44,186 @@ function scoreMatch(
     }
   }
 
-  // ── 2. Joylashuv ────────────────────────────────────────────────────────
+  // ── 2. Joylashuv ─────────────────────────────────────────────────────────
   if (filter.location) {
-    const filterLocs = filter.location.split(",").map((l) => l.trim());
-
+    const filterLocs = filter.location.split(",").map((l) => l.trim().toLowerCase());
     const wantsRemote = filterLocs.includes("remote");
+
     const vacIsRemote =
       vacancy.workType === "remote" ||
-      textLower.includes("remote") ||
-      textLower.includes("masofaviy") ||
-      textLower.includes("удалённ");
+      /remote|masofaviy|удалённ|онлайн/i.test(vacancy.text);
 
     const locMatch =
       filterLocs.some((loc) => textLower.includes(loc)) ||
-      filterLocs.some((loc) =>
-        (vacancy.location?.toLowerCase() ?? "").includes(loc),
-      );
+      filterLocs.some((loc) => (vacancy.location?.toLowerCase() ?? "").includes(loc));
 
     if (!locMatch && !(wantsRemote && vacIsRemote)) return 0;
     score += 8;
   }
 
-  // ── 3. Ish turi ─────────────────────────────────────────────────────────
+  // ── 3. Ish turi ──────────────────────────────────────────────────────────
   if (filter.workType && vacancy.workType) {
-    if (filter.workType !== vacancy.workType) {
-      const isHybrid =
-        filter.workType === "hybrid" || vacancy.workType === "hybrid";
-      if (!isHybrid) return 0;
-    } else {
+    if (filter.workType === vacancy.workType) {
       score += 6;
+    } else {
+      const hybrid = filter.workType === "hybrid" || vacancy.workType === "hybrid";
+      if (!hybrid) return 0;
     }
   }
 
   // ── 4. Daraja ────────────────────────────────────────────────────────────
   if (filter.level && vacancy.level) {
-    const order: Record<string, number> = {
-      intern: 0, junior: 1, middle: 2, senior: 3, lead: 4,
-    };
-    const filterOrd  = order[filter.level]  ?? -1;
-    const vacancyOrd = order[vacancy.level] ?? -1;
-    if (vacancyOrd < filterOrd) return 0;
-    if (filterOrd === vacancyOrd) score += 7;
+    const ord: Record<string, number> = { junior: 1, middle: 2, senior: 3 };
+    const fOrd = ord[filter.level]  ?? 0;
+    const vOrd = ord[vacancy.level] ?? 0;
+    if (vOrd < fOrd) return 0;        // vacancy darajasi pastroq — skip
+    if (fOrd === vOrd) score += 7;
   }
 
   // ── 5. Maosh ─────────────────────────────────────────────────────────────
   if (filter.minSalary) {
     if (vacancy.salaryMin && vacancy.salaryMin < filter.minSalary) return 0;
     if (vacancy.salaryMin) score += 5;
+    // Maosh ko'rsatilmagan — o'tkazamiz (foydalanuvchi o'zi ko'radi)
   }
 
   return score;
 }
 
-function escapeRegex(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+// ─── Formatter ────────────────────────────────────────────────────────────────
 
-// ─── Notification formatter ───────────────────────────────────────────────────
+const LEVEL_BADGE: Record<string, string> = {
+  junior: "🟢 Junior", middle: "🟡 Middle", senior: "🔴 Senior", intern: "🟣 Intern",
+};
+const WORK_BADGE: Record<string, string> = {
+  remote: "🏠 Remote", office: "🏢 Ofis", hybrid: "🔄 Hybrid",
+};
 
 function formatSalary(v: Vacancy): string | null {
   if (!v.salary) return null;
   if (v.salaryMin && v.salaryMax) {
-    const min = v.salaryMin.toLocaleString("ru");
-    const max = v.salaryMax.toLocaleString("ru");
-    return `${min} – ${max} so'm`;
+    return `${v.salaryMin.toLocaleString("ru")} – ${v.salaryMax.toLocaleString("ru")} so'm`;
   }
-  if (v.salaryMin) {
-    return `${v.salaryMin.toLocaleString("ru")} so'm+`;
-  }
+  if (v.salaryMin) return `${v.salaryMin.toLocaleString("ru")} so'm+`;
   return v.salary;
 }
 
 function formatNotification(vacancy: Vacancy): string {
-  const lines: string[] = [];
+  const parts: string[] = [];
 
-  // ── Header ──────────────────────────────────────────────────────────────
-  const levelEmoji: Record<string, string> = {
-    junior: "🟢", middle: "🟡", senior: "🔴", intern: "🟣", lead: "⚫",
-  };
-  const levelLabel: Record<string, string> = {
-    junior: "Junior", middle: "Middle", senior: "Senior", intern: "Intern", lead: "Lead",
-  };
-  const workLabel: Record<string, string> = {
-    remote: "🏠 Remote", office: "🏢 Ofis", hybrid: "🔄 Hybrid",
-  };
+  // ── Sarlavha ─────────────────────────────────────────────────────────────
+  const titleText = vacancy.title
+    ? `💼 <b>${escapeHtml(vacancy.title)}</b>`
+    : `💼 <b>Yangi vakansiya</b>`;
+  parts.push(titleText);
 
-  const lvl = vacancy.level ? `${levelEmoji[vacancy.level] ?? "⚪"} ${levelLabel[vacancy.level]}` : null;
-  const wt  = vacancy.workType ? workLabel[vacancy.workType] ?? vacancy.workType : null;
-
-  // Title
-  if (vacancy.title) {
-    lines.push(`💼 <b>${escapeHtml(vacancy.title)}</b>`);
-  } else {
-    lines.push(`💼 <b>Yangi vakansiya</b>`);
-  }
-
-  // Company
   if (vacancy.company) {
-    lines.push(`🏢 ${escapeHtml(vacancy.company)}`);
+    parts.push(`🏢 ${escapeHtml(vacancy.company)}`);
   }
 
-  lines.push("");
-
-  // Meta chips: daraja · ish turi · joylashuv
-  const chips: string[] = [];
-  if (lvl)              chips.push(lvl);
-  if (wt)               chips.push(wt);
+  // ── Meta qator ───────────────────────────────────────────────────────────
+  const meta: string[] = [];
+  if (vacancy.level)    meta.push(LEVEL_BADGE[vacancy.level] ?? vacancy.level);
+  if (vacancy.workType) meta.push(WORK_BADGE[vacancy.workType] ?? vacancy.workType);
   if (vacancy.location) {
-    const locItem = LOCATIONS.find((l) =>
+    const loc = LOCATIONS.find((l) =>
       l.keywords.some((k) => vacancy.location!.toLowerCase().includes(k)),
     );
-    chips.push(locItem ? locItem.label : `📍 ${escapeHtml(vacancy.location)}`);
+    meta.push(loc ? loc.label : `📍 ${escapeHtml(vacancy.location)}`);
   }
-  if (chips.length) lines.push(chips.join("  ·  "));
+  if (meta.length) parts.push("\n" + meta.join("  ·  "));
 
-  // Stack
+  // ── Texnologiyalar ───────────────────────────────────────────────────────
   if (vacancy.technologies?.length) {
-    const techStr = vacancy.technologies
-      .map((t) => `#${t.replace(/[.\s]/g, "_")}`)
-      .join(" ");
-    lines.push(`\n🛠 <code>${escapeHtml(vacancy.technologies.join(" · "))}</code>`);
+    parts.push(`🛠 <code>${escapeHtml(vacancy.technologies.join(" · "))}</code>`);
   }
 
-  // Maosh
-  const salaryFormatted = formatSalary(vacancy);
-  if (salaryFormatted) {
-    lines.push(`💰 <b>${escapeHtml(salaryFormatted)}</b>`);
-  }
+  // ── Maosh ────────────────────────────────────────────────────────────────
+  const sal = formatSalary(vacancy);
+  if (sal) parts.push(`💰 <b>${escapeHtml(sal)}</b>`);
 
-  lines.push("");
-
-  // Kontakt
+  // ── Kontakt ──────────────────────────────────────────────────────────────
   const contacts: string[] = [];
-  if (vacancy.telegramContact) {
-    contacts.push(`📨 ${escapeHtml(vacancy.telegramContact)}`);
-  }
-  if (vacancy.phone) {
-    contacts.push(`📞 <code>${escapeHtml(vacancy.phone)}</code>`);
-  }
-  if (contacts.length) lines.push(contacts.join("  ·  "));
+  if (vacancy.telegramContact) contacts.push(`📨 ${escapeHtml(vacancy.telegramContact)}`);
+  if (vacancy.phone)           contacts.push(`📞 <code>${escapeHtml(vacancy.phone)}</code>`);
+  if (contacts.length) parts.push("\n" + contacts.join("  "));
 
-  // Manba
-  lines.push(`\n📡 <i>${escapeHtml(vacancy.channel)}</i>`);
+  // ── Manba ────────────────────────────────────────────────────────────────
+  parts.push(`\n📡 <i>${escapeHtml(vacancy.channel)}</i>`);
 
-  // To'liq matn preview — faqat structured ma'lumot yetarli bo'lmasa
-  const hasStructured =
-    (vacancy.title ?? "").length > 5 ||
-    (vacancy.technologies?.length ?? 0) > 0;
+  // ── Matn preview — agar strukturali ma'lumot yetarli bo'lmasa ────────────
+  const hasEnoughInfo =
+    (vacancy.title?.length ?? 0) > 5 || (vacancy.technologies?.length ?? 0) > 0;
 
-  if (!hasStructured) {
-    lines.push("\n─────────────────────");
-    const preview =
-      vacancy.text.length > 600
-        ? vacancy.text.slice(0, 600) + "…"
-        : vacancy.text;
-    const clean = preview
+  if (!hasEnoughInfo) {
+    const maxLen = 800;
+    const raw = vacancy.text.length > maxLen
+      ? vacancy.text.slice(0, maxLen) + "…"
+      : vacancy.text;
+    const clean = raw
       .replace(/\*\*|__/g, "")
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-    lines.push(`<blockquote expandable>${escapeHtml(clean)}</blockquote>`);
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .trim();
+    parts.push(`\n<blockquote expandable>${escapeHtml(clean)}</blockquote>`);
   }
 
-  return lines.join("\n");
+  return parts.join("\n");
 }
 
-function buildInlineKeyboard(vacancy: Vacancy) {
-  const buttons: ReturnType<typeof Markup.button.url>[] = [];
+function buildKeyboard(vacancy: Vacancy) {
+  const rows: ReturnType<typeof Markup.button.url>[][] = [];
 
   if (vacancy.messageLink) {
-    buttons.push(Markup.button.url("📋 To'liq e'lonni ko'rish", vacancy.messageLink));
+    rows.push([Markup.button.url("📋 To'liq e'lonni ko'rish", vacancy.messageLink)]);
   }
-
   if (vacancy.telegramContact) {
-    const username = vacancy.telegramContact.replace("@", "");
-    buttons.push(Markup.button.url("📨 Murojaat qilish", `https://t.me/${username}`));
+    const u = vacancy.telegramContact.replace("@", "");
+    rows.push([Markup.button.url("📨 Murojaat qilish", `https://t.me/${u}`)]);
   }
 
-  if (!buttons.length) return undefined;
+  return rows.length ? Markup.inlineKeyboard(rows) : undefined;
+}
 
-  // Agar ikkita bo'lsa — ikki qator
-  if (buttons.length === 2) {
-    return Markup.inlineKeyboard([
-      [buttons[0]],
-      [buttons[1]],
-    ]);
-  }
-  return Markup.inlineKeyboard([buttons]);
+// ─── Rate limiter ─────────────────────────────────────────────────────────────
+// Telegram: max ~30 msg/sec global, lekin xavfsizlik uchun ~10/sec
+let sendQueue = Promise.resolve();
+const SEND_DELAY_MS = 120; // ~8 msg/sec
+
+function enqueueSend(fn: () => Promise<void>): Promise<void> {
+  sendQueue = sendQueue.then(() =>
+    fn().then(
+      () => new Promise<void>((res) => setTimeout(res, SEND_DELAY_MS)),
+      ()  => new Promise<void>((res) => setTimeout(res, SEND_DELAY_MS)),
+    )
+  );
+  return sendQueue;
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export async function matchAndNotify(vacancyId: number): Promise<void> {
   const vacancy = await prisma.vacancy.findUnique({ where: { id: vacancyId } });
-  if (!vacancy) return;
-
-  // Rezyumelarga notification yuborilmaydi
-  if (vacancy.jobType === "resume") return;
+  if (!vacancy || vacancy.jobType === "resume") return;
 
   const filters = await prisma.filter.findMany({
-    where: { user: { isActive: true } },
+    where:   { user: { isActive: true } },
     include: { user: true },
   });
   if (!filters.length) return;
 
-  // Duplicate tekshiruv
-  const existing = await prisma.notification.findMany({
-    where: { vacancyId, userId: { in: filters.map((f) => f.userId) } },
+  // Allaqachon yuborilgan foydalanuvchilar
+  const sent = await prisma.notification.findMany({
+    where:  { vacancyId, userId: { in: filters.map((f) => f.userId) } },
     select: { userId: true },
   });
-  const alreadySent = new Set(existing.map((n) => n.userId.toString()));
+  const sentSet = new Set(sent.map((n) => n.userId.toString()));
 
   // Score hisoblash
   const matched = filters
-    .filter((f) => !alreadySent.has(f.userId.toString()))
+    .filter((f) => !sentSet.has(f.userId.toString()))
     .map((f) => ({
       filter: f,
-      score: scoreMatch(vacancy, {
+      score:  scoreMatch(vacancy, {
         keywords:  f.keywords,
         location:  f.location,
         workType:  f.workType,
@@ -267,49 +234,44 @@ export async function matchAndNotify(vacancyId: number): Promise<void> {
     .filter(({ score }) => score > 0)
     .sort((a, b) => b.score - a.score);
 
-  logger.info(CTX, `#${vacancyId} — ${matched.length}/${filters.length} mos`, {
-    title: vacancy.title,
+  logger.info(CTX, `#${vacancyId} → ${matched.length}/${filters.length} mos`, {
+    title:   vacancy.title,
     channel: vacancy.channel,
-    link: vacancy.messageLink,
   });
 
   if (!matched.length) return;
 
-  const message  = formatNotification(vacancy);
-  const keyboard = buildInlineKeyboard(vacancy);
+  const text     = formatNotification(vacancy);
+  const keyboard = buildKeyboard(vacancy);
 
-  await runWithConcurrency(matched, async ({ filter }) => {
-    try {
-      await bot.telegram.sendMessage(filter.userId.toString(), message, {
-        parse_mode: "HTML",
-        ...(keyboard ?? {}),
-      });
-      await prisma.notification.create({
-        data: { userId: filter.userId, vacancyId: vacancy.id },
-      });
-      logger.info(CTX, `✅ → ${filter.userId}`);
-    } catch (err: any) {
-      if (err.code === 403) {
-        await prisma.user.update({
-          where: { telegramId: filter.userId },
-          data:  { isActive: false },
+  for (const { filter } of matched) {
+    enqueueSend(async () => {
+      try {
+        await bot.telegram.sendMessage(
+          filter.userId.toString(),
+          text,
+          { parse_mode: "HTML", ...(keyboard ?? {}) },
+        );
+        await prisma.notification.create({
+          data: { userId: filter.userId, vacancyId: vacancy.id },
         });
-        logger.warn(CTX, `Bloklagan, deactivate → ${filter.userId}`);
-      } else {
-        logger.error(CTX, `Xato → ${filter.userId}`, { error: err.message });
+        logger.info(CTX, `✅ → userId:${filter.userId}`);
+      } catch (err: any) {
+        if (err?.code === 403 || err?.description?.includes("blocked")) {
+          await prisma.user.update({
+            where: { telegramId: filter.userId },
+            data:  { isActive: false },
+          });
+          logger.warn(CTX, `Bot bloki → deactivate userId:${filter.userId}`);
+        } else if (err?.code === 429) {
+          // Rate limit — keyingi urinish uchun kutamiz
+          const retry = (err?.parameters?.retry_after ?? 10) * 1000;
+          logger.warn(CTX, `Rate limit — ${retry}ms kutilmoqda`);
+          await new Promise((res) => setTimeout(res, retry));
+        } else {
+          logger.error(CTX, `Xato → userId:${filter.userId}`, { error: err?.message });
+        }
       }
-    }
-  }, 5);
-}
-
-async function runWithConcurrency<T>(
-  items: T[],
-  fn: (item: T) => Promise<void>,
-  limit: number,
-): Promise<void> {
-  let i = 0;
-  const worker = async () => {
-    while (i < items.length) await fn(items[i++] as T);
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+    });
+  }
 }
