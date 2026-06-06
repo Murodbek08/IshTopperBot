@@ -1,34 +1,43 @@
 /**
- * In-memory session — filter yaratish jarayonini saqlaydi (5 qadam)
+ * In-memory session — filter yaratish va qidirish jarayonini saqlaydi
  */
 
 export type FilterStep =
-  | "awaiting_field"         // 1/5 — soha
-  | "awaiting_technologies"  // 2/5 — texnologiyalar
-  | "awaiting_level"         // 3/5 — daraja
-  | "awaiting_work_type"     // 4/5 — ish turi
-  | "awaiting_location"      // 5/5 — viloyat
-  | "awaiting_salary"        // 6/6 — maosh (ixtiyoriy)
-  | "awaiting_custom_tech";  // custom tech yozish
+  | "awaiting_field"
+  | "awaiting_technologies"
+  | "awaiting_level"
+  | "awaiting_work_type"
+  | "awaiting_location"
+  | "awaiting_salary"
+  | "awaiting_custom_tech"
+  | "awaiting_search_query"    // qidirish
+  | "awaiting_silent_from"     // sokin soat boshlanishi
+  | "awaiting_silent_to";      // sokin soat tugashi
 
 export interface FilterSession {
-  step: FilterStep;
-  field?: string;
-  technologies?: string[];   // texnologiya label'lari
-  level?: string | null;
-  workType?: string | null;
-  location?: string | null;
-  minSalary?: number | null;
+  step:         FilterStep;
+  field?:       string;
+  technologies?: string[];
+  level?:       string | null;
+  workType?:    string | null;
+  location?:    string | null;
+  minSalary?:   number | null;
 }
 
 export type SessionStore = {
-  get: (userId: number) => FilterSession | undefined;
-  set: (userId: number, session: FilterSession) => void;
+  get:    (userId: number) => FilterSession | undefined;
+  set:    (userId: number, session: FilterSession) => void;
   delete: (userId: number) => void;
 };
 
 export function createSessionStore(): SessionStore {
   const store = new Map<number, FilterSession>();
+
+  // Sessiyalarni 30 daqiqada tozalash (xotira)
+  setInterval(() => {
+    store.clear();
+  }, 30 * 60 * 1000);
+
   return {
     get:    (id) => store.get(id),
     set:    (id, s) => store.set(id, s),

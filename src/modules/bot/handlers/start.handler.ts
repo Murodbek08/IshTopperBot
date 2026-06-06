@@ -7,51 +7,32 @@ export function registerStartHandler(bot: Telegraf) {
     const { id, username, first_name } = ctx.from;
 
     await prisma.user.upsert({
-      where: { telegramId: BigInt(id) },
-      update: { isActive: true, username: username ?? null },
+      where:  { telegramId: BigInt(id) },
+      update: { isActive: true, username: username ?? null, firstName: first_name ?? null },
       create: {
         telegramId: BigInt(id),
-        username: username ?? null,
-        firstName: first_name ?? null,
+        username:   username ?? null,
+        firstName:  first_name ?? null,
       },
     });
 
     const name = escapeHtml(first_name ?? "do'stim");
 
+    const text =
+      `👋 Salom, <b>${name}</b>!\n\n` +
+      `🤖 <b>IshTopperBot</b>ga xush kelibsiz!\n\n` +
+      `<b>Men nima qilaman?</b>\n` +
+      `📡 <b>29+ Telegram kanal</b>ni real-vaqtda kuzataman\n` +
+      `🎯 Filtringizga mos vakansiyalarni <b>darhol</b> yuboraman\n` +
+      `🔍 Maosh, daraja, hudud bo'yicha <b>aniq filtrlash</b>\n\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🚀 <b>Boshlash:</b> <i>➕ Filter qo'shish</i> tugmasini bosing`;
+
     await ctx.replyWithAnimation(
       { url: "https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExbzU5eDh5dXhxeXlqaGZ4NHNlYXE4bHN0N3Z5NXBnZm95OW1kMHNlbyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7abKhOpu0NwenH3O/giphy.gif" },
-      {
-        caption:
-          `👋 Salom, <b>${name}</b>!\n\n` +
-          `🤖 <b>Vakansiya Bot</b>ga xush kelibsiz!\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
-          `🎯 Men nima qilaman?\n\n` +
-          `📡 <b>29+ kanal</b>dan real-vaqtda vakansiyalarni kuzataman\n` +
-          `🔍 Sizning filtringizga mos kelganlarini <b>avtomatik</b> yuboraman\n` +
-          `⚡ Yangi vakansiya chiqqanida <b>darhol</b> xabar beraman\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
-          `🚀 <b>Boshlash uchun:</b>\n` +
-          `➕ <i>Filter qo'shish</i> tugmasini bosing va yo'nalishingizni tanlang!\n\n` +
-          `💡 <i>Filter qanchalik aniq bo'lsa — vakansiyalar shunchalik mos keladi</i>`,
-        parse_mode: "HTML",
-        ...mainKeyboard(),
-      }
+      { caption: text, parse_mode: "HTML", ...mainKeyboard() },
     ).catch(() =>
-      // Agar GIF yuborilmasa — oddiy matn bilan yuborish
-      ctx.reply(
-        `✨ Salom, <b>${name}</b>! 👋\n\n` +
-          `🤖 <b>Vakansiya Bot</b>ga xush kelibsiz!\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
-          `📡 <b>29+ kanal</b>dan real-vaqtda vakansiyalarni kuzataman\n` +
-          `🔍 Filtringizga mos vakansiyalarni <b>avtomatik</b> yuboraman\n` +
-          `⚡ Yangi vakansiya chiqqanida <b>darhol</b> xabar beraman\n\n` +
-          `━━━━━━━━━━━━━━━━━━━━\n` +
-          `🚀 Boshlash uchun <b>➕ Filter qo'shish</b> tugmasini bosing!`,
-        {
-          parse_mode: "HTML",
-          ...mainKeyboard(),
-        }
-      )
+      ctx.reply(text, { parse_mode: "HTML", ...mainKeyboard() }),
     );
   });
 }
@@ -59,6 +40,7 @@ export function registerStartHandler(bot: Telegraf) {
 export function mainKeyboard() {
   return Markup.keyboard([
     ["➕ Filter qo'shish", "📋 Filterlarim"],
-    ["⏸ Pauzaga qo'yish", "ℹ️ Yordam"],
+    ["🔍 Qidirish",        "🕘 Tarixi"],
+    ["📊 Statistika",      "⚙️ Sozlamalar"],
   ]).resize();
 }

@@ -218,9 +218,24 @@ export async function matchAndNotify(vacancyId: number): Promise<void> {
   });
   const sentSet = new Set(sent.map((n) => n.userId.toString()));
 
-  // Score hisoblash
+  // Toshkent soati (UTC+5)
+  const tashkentHour = (new Date().getUTCHours() + 5) % 24;
+
+  // Score hisoblash + sokin soatlar tekshiruvi
   const matched = filters
     .filter((f) => !sentSet.has(f.userId.toString()))
+    .filter((f) => {
+      // Sokin soatlar tekshiruvi
+      const u = f.user as any;
+      if (u?.silentFrom == null || u?.silentTo == null) return true;
+      const from = u.silentFrom as number;
+      const to   = u.silentTo   as number;
+      // Tungi diapazon: from > to (masalan 23:00 – 07:00)
+      const isSilent = from > to
+        ? (tashkentHour >= from || tashkentHour < to)
+        : (tashkentHour >= from && tashkentHour < to);
+      return !isSilent;
+    })
     .map((f) => ({
       filter: f,
       score:  scoreMatch(vacancy, {

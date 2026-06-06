@@ -11,9 +11,11 @@ model User {
   telegramId BigInt   @unique
   username   String?
   firstName  String?
-  isActive   Boolean  @default(true)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  isActive    Boolean  @default(true)
+  silentFrom  Int?     // sokin soat boshlanishi (0-23), null = o'chirilgan
+  silentTo    Int?     // sokin soat tugashi (0-23)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   filters       Filter[]
   notifications Notification[]

@@ -5,6 +5,9 @@ import { createSessionStore } from "./session";
 import { registerStartHandler } from "./handlers/start.handler";
 import { registerFilterHandlers } from "./handlers/filter.handler";
 import { registerMessageHandler } from "./handlers/message.handler";
+import { registerStatsHandler } from "./handlers/stats.handler";
+import { registerSettingsHandler } from "./handlers/settings.handler";
+import { registerAdminHandler } from "./handlers/admin.handler";
 
 dotenv.config();
 
@@ -17,26 +20,26 @@ if (!process.env.BOT_TOKEN) {
 export const bot = new Telegraf(process.env.BOT_TOKEN);
 const sessions = createSessionStore();
 
-// ─── Handlers ─────────────────────────────────────────────────────────────────
+// ─── Handlerlarni tartib bilan ro'yxatdan o'tkazamiz ─────────────────────────
 registerStartHandler(bot);
+registerStatsHandler(bot, sessions);
+registerSettingsHandler(bot, sessions);
 registerFilterHandlers(bot, sessions);
-registerMessageHandler(bot, sessions);
+registerAdminHandler(bot);
+registerMessageHandler(bot, sessions);   // OXIRIDA — fallback handler
 
 // ─── Global error handler ─────────────────────────────────────────────────────
 bot.catch((err: any, ctx) => {
-  logger.error(CTX, `Update xatosi: ${err.message}`, {
+  logger.error(CTX, `Update xatosi: ${err?.message ?? String(err)}`, {
     updateType: ctx.updateType,
-    user: ctx.from?.id,
+    user:       ctx.from?.id,
   });
 });
 
 export async function startBot(): Promise<void> {
-  await bot.launch({
-    dropPendingUpdates: true, // eski xabarlarni o'tkazib yuborish
-  });
+  await bot.launch({ dropPendingUpdates: true });
+  logger.info(CTX, `✅ Bot ishga tushdi: @${bot.botInfo?.username}`);
 
-  logger.info(CTX, `Bot ishga tushdi: @${bot.botInfo?.username} ✅`);
-
-  process.once("SIGINT", () => bot.stop("SIGINT"));
+  process.once("SIGINT",  () => bot.stop("SIGINT"));
   process.once("SIGTERM", () => bot.stop("SIGTERM"));
 }
