@@ -53,6 +53,7 @@ model Vacancy {
   workType        String?  // "remote"|"office"|"hybrid"
   level           String?  // "junior"|"middle"|"senior"
   jobType         String?  // "vacancy"|"resume"
+  messageLink     String?  // https://t.me/channelname/messageId
   isActive        Boolean  @default(true)
   createdAt       DateTime @default(now())
 

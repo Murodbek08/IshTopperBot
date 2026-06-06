@@ -4,22 +4,12 @@ import { escapeHtml } from "../bot/utils";
 import { bot } from "../bot";
 import type { Vacancy, Filter } from "@prisma/client";
 import { WORK_TYPES, LEVELS, LOCATIONS } from "../bot/filter-data";
+import { Markup } from "telegraf";
 
 const CTX = "Matcher";
 
 // ─── Scoring ──────────────────────────────────────────────────────────────────
-/**
- * 0   → mos kelmadi (yuborilmaydi)
- * 1+  → mos keldi  (qancha yuqori bo'lsa, shuncha mos)
- *
- * Filter.keywords MASSIVI — texnologiyalar uchun expanded lowercase keywords:
- *   ["react", "reactjs", "react.js", "typescript", "ts", "frontend"]
- *
- * Filter.location — birinchi keywords string yoki keywords join(","):
- *   "toshkent,tashkent,ташкент"  yoki  null (hammasi)
- *
- * Filter.workType — "remote" | "office" | "hybrid" | null
- */
+
 function scoreMatch(
   vacancy: Vacancy,
   filter: {
@@ -36,7 +26,6 @@ function scoreMatch(
   // ── 1. Keyword matching (MANDATORY — kamida 1 ta mos kelishi kerak) ─────
   let hits = 0;
   for (const kw of filter.keywords) {
-    // Word-boundary-ga yaqin match
     const re = new RegExp(
       `(?<![a-z0-9])${escapeRegex(kw.toLowerCase())}(?![a-z0-9])`,
     );
@@ -57,9 +46,7 @@ function scoreMatch(
   if (filter.location) {
     const filterLocs = filter.location.split(",").map((l) => l.trim());
 
-    // Remote filteri bo'lsa — remote vakansiyalarga ham mos
     const wantsRemote = filterLocs.includes("remote");
-
     const vacIsRemote =
       vacancy.workType === "remote" ||
       textLower.includes("remote") ||
@@ -79,7 +66,6 @@ function scoreMatch(
   // ── 3. Ish turi ─────────────────────────────────────────────────────────
   if (filter.workType && vacancy.workType) {
     if (filter.workType !== vacancy.workType) {
-      // Hybrid har ikki tomonni qabul qiladi
       const isHybrid =
         filter.workType === "hybrid" || vacancy.workType === "hybrid";
       if (!isHybrid) return 0;
@@ -95,7 +81,7 @@ function scoreMatch(
     };
     const filterOrd  = order[filter.level]  ?? -1;
     const vacancyOrd = order[vacancy.level] ?? -1;
-    if (vacancyOrd < filterOrd) return 0; // daraja pastroq bo'lsa yo'q
+    if (vacancyOrd < filterOrd) return 0;
     if (filterOrd === vacancyOrd) score += 7;
   }
 
@@ -103,7 +89,6 @@ function scoreMatch(
   if (filter.minSalary) {
     if (vacancy.salaryMin && vacancy.salaryMin < filter.minSalary) return 0;
     if (vacancy.salaryMin) score += 5;
-    // Maosh ko'rsatilmagan vakansiyalar o'tadi (foydalanuvchi ko'radi)
   }
 
   return score;
@@ -115,80 +100,133 @@ function escapeRegex(s: string): string {
 
 // ─── Notification formatter ───────────────────────────────────────────────────
 
+function formatSalary(v: Vacancy): string | null {
+  if (!v.salary) return null;
+  if (v.salaryMin && v.salaryMax) {
+    const min = v.salaryMin.toLocaleString("ru");
+    const max = v.salaryMax.toLocaleString("ru");
+    return `${min} – ${max} so'm`;
+  }
+  if (v.salaryMin) {
+    return `${v.salaryMin.toLocaleString("ru")} so'm+`;
+  }
+  return v.salary;
+}
+
 function formatNotification(vacancy: Vacancy): string {
   const lines: string[] = [];
 
-  lines.push(`🔔 <b>Yangi vakansiya!</b>  ·  <i>${escapeHtml(vacancy.channel)}</i>`);
-  lines.push("━━━━━━━━━━━━━━━━━━━━");
-  lines.push("");
+  // ── Header ──────────────────────────────────────────────────────────────
+  const levelEmoji: Record<string, string> = {
+    junior: "🟢", middle: "🟡", senior: "🔴", intern: "🟣", lead: "⚫",
+  };
+  const levelLabel: Record<string, string> = {
+    junior: "Junior", middle: "Middle", senior: "Senior", intern: "Intern", lead: "Lead",
+  };
+  const workLabel: Record<string, string> = {
+    remote: "🏠 Remote", office: "🏢 Ofis", hybrid: "🔄 Hybrid",
+  };
 
+  const lvl = vacancy.level ? `${levelEmoji[vacancy.level] ?? "⚪"} ${levelLabel[vacancy.level]}` : null;
+  const wt  = vacancy.workType ? workLabel[vacancy.workType] ?? vacancy.workType : null;
+
+  // Title
   if (vacancy.title) {
-    lines.push(`📌 <b>${escapeHtml(vacancy.title)}</b>`);
+    lines.push(`💼 <b>${escapeHtml(vacancy.title)}</b>`);
+  } else {
+    lines.push(`💼 <b>Yangi vakansiya</b>`);
   }
+
+  // Company
   if (vacancy.company) {
     lines.push(`🏢 ${escapeHtml(vacancy.company)}`);
   }
 
-  // Meta satri
-  const meta: string[] = [];
+  lines.push("");
+
+  // Meta chips: daraja · ish turi · joylashuv
+  const chips: string[] = [];
+  if (lvl)              chips.push(lvl);
+  if (wt)               chips.push(wt);
   if (vacancy.location) {
-    // Location label topamiz
     const locItem = LOCATIONS.find((l) =>
       l.keywords.some((k) => vacancy.location!.toLowerCase().includes(k)),
     );
-    meta.push(locItem ? locItem.label : `📍 ${escapeHtml(vacancy.location)}`);
+    chips.push(locItem ? locItem.label : `📍 ${escapeHtml(vacancy.location)}`);
   }
-  if (vacancy.workType) {
-    const wt = { remote: "🏠 Remote", office: "🏢 Ofis", hybrid: "🔄 Hybrid" };
-    meta.push(wt[vacancy.workType as keyof typeof wt] ?? vacancy.workType);
-  }
-  if (vacancy.level) {
-    const lv: Record<string, string> = {
-      intern: "🟣 Intern", junior: "🟢 Junior",
-      middle: "🟡 Middle", senior: "🔴 Senior", lead: "⚫ Lead",
-    };
-    meta.push(lv[vacancy.level] ?? vacancy.level);
-  }
-  if (meta.length) lines.push(meta.join("  ·  "));
+  if (chips.length) lines.push(chips.join("  ·  "));
 
   // Stack
   if (vacancy.technologies?.length) {
-    lines.push(`🛠 <code>${vacancy.technologies.join(", ")}</code>`);
+    const techStr = vacancy.technologies
+      .map((t) => `#${t.replace(/[.\s]/g, "_")}`)
+      .join(" ");
+    lines.push(`\n🛠 <code>${escapeHtml(vacancy.technologies.join(" · "))}</code>`);
   }
 
   // Maosh
-  if (vacancy.salary) {
-    lines.push(`💰 <b>${escapeHtml(vacancy.salary)}</b>`);
+  const salaryFormatted = formatSalary(vacancy);
+  if (salaryFormatted) {
+    lines.push(`💰 <b>${escapeHtml(salaryFormatted)}</b>`);
   }
+
+  lines.push("");
 
   // Kontakt
-  lines.push("");
+  const contacts: string[] = [];
   if (vacancy.telegramContact) {
-    lines.push(`📨 ${escapeHtml(vacancy.telegramContact)}`);
+    contacts.push(`📨 ${escapeHtml(vacancy.telegramContact)}`);
   }
   if (vacancy.phone) {
-    lines.push(`📞 <code>${escapeHtml(vacancy.phone)}</code>`);
+    contacts.push(`📞 <code>${escapeHtml(vacancy.phone)}</code>`);
+  }
+  if (contacts.length) lines.push(contacts.join("  ·  "));
+
+  // Manba
+  lines.push(`\n📡 <i>${escapeHtml(vacancy.channel)}</i>`);
+
+  // To'liq matn preview — faqat structured ma'lumot yetarli bo'lmasa
+  const hasStructured =
+    (vacancy.title ?? "").length > 5 ||
+    (vacancy.technologies?.length ?? 0) > 0;
+
+  if (!hasStructured) {
+    lines.push("\n─────────────────────");
+    const preview =
+      vacancy.text.length > 600
+        ? vacancy.text.slice(0, 600) + "…"
+        : vacancy.text;
+    const clean = preview
+      .replace(/\*\*|__/g, "")
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+    lines.push(`<blockquote expandable>${escapeHtml(clean)}</blockquote>`);
   }
 
-  lines.push("");
-  lines.push("─────────────────────");
-
-  // Preview
-  const hasStructured =
-    vacancy.title || vacancy.company || (vacancy.technologies?.length ?? 0) > 0;
-  const maxLen = hasStructured ? 350 : 700;
-  const preview =
-    vacancy.text.length > maxLen
-      ? vacancy.text.slice(0, maxLen) + "…"
-      : vacancy.text;
-
-  const clean = preview
-    .replace(/\*\*|__/g, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-
-  lines.push(`<blockquote expandable>${escapeHtml(clean)}</blockquote>`);
-
   return lines.join("\n");
+}
+
+function buildInlineKeyboard(vacancy: Vacancy) {
+  const buttons: ReturnType<typeof Markup.button.url>[] = [];
+
+  if (vacancy.messageLink) {
+    buttons.push(Markup.button.url("📋 To'liq e'lonni ko'rish", vacancy.messageLink));
+  }
+
+  if (vacancy.telegramContact) {
+    const username = vacancy.telegramContact.replace("@", "");
+    buttons.push(Markup.button.url("📨 Murojaat qilish", `https://t.me/${username}`));
+  }
+
+  if (!buttons.length) return undefined;
+
+  // Agar ikkita bo'lsa — ikki qator
+  if (buttons.length === 2) {
+    return Markup.inlineKeyboard([
+      [buttons[0]],
+      [buttons[1]],
+    ]);
+  }
+  return Markup.inlineKeyboard([buttons]);
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -232,16 +270,19 @@ export async function matchAndNotify(vacancyId: number): Promise<void> {
   logger.info(CTX, `#${vacancyId} — ${matched.length}/${filters.length} mos`, {
     title: vacancy.title,
     channel: vacancy.channel,
+    link: vacancy.messageLink,
   });
 
   if (!matched.length) return;
 
-  const message = formatNotification(vacancy);
+  const message  = formatNotification(vacancy);
+  const keyboard = buildInlineKeyboard(vacancy);
 
   await runWithConcurrency(matched, async ({ filter }) => {
     try {
       await bot.telegram.sendMessage(filter.userId.toString(), message, {
         parse_mode: "HTML",
+        ...(keyboard ?? {}),
       });
       await prisma.notification.create({
         data: { userId: filter.userId, vacancyId: vacancy.id },

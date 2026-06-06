@@ -50,19 +50,35 @@ const CHANNELS = [
 // ─── Spam / reklama filterlash ────────────────────────────────────────────────
 
 const SPAM_PATTERNS = [
-  /t\.me\/joinchat/i,              // kanal taklifi
-  /подпишитесь|obuna bo.ling/i,    // obuna so'rovi (reklama)
+  /t\.me\/joinchat/i,
+  /подпишитесь|obuna bo.ling/i,
   /рефeral|referral|affiliate/i,
   /казино|casino|bukmeker/i,
   /kriptovalyuta investitsiya/i,
   /earn \$\d+/i,
   /100% daromad/i,
+  /stavka qo'ying|stavka qo.ying/i,
+  /промокод|promo kod/i,
+];
+
+// Qisqa matn lekin aniq ish e'loni bo'lsa — o'tkazib yubormaymiz
+const JOB_SIGNAL_PATTERNS = [
+  /developer|dasturchi|dizayner|manager|specialist|mutaxassis/i,
+  /kerak|вакансия|vacancy|ishga qabul/i,
+  /resume|rezyume|резюме/i,
+  /@[A-Za-z0-9_]{3,}/,
 ];
 
 function isSpam(text: string): boolean {
-  // Juda qisqa xabarlar
-  if (text.trim().length < 50) return true;
-  return SPAM_PATTERNS.some((p) => p.test(text));
+  if (SPAM_PATTERNS.some((p) => p.test(text))) return true;
+
+  // Juda qisqa xabarlar — lekin ish belgisi bo'lsa o'tkazib yubormaymiz
+  if (text.trim().length < 50) {
+    const hasJobSignal = JOB_SIGNAL_PATTERNS.some((p) => p.test(text));
+    return !hasJobSignal;
+  }
+
+  return false;
 }
 
 // ─── Client ───────────────────────────────────────────────────────────────────
@@ -89,9 +105,8 @@ async function handleNewMessage(
   client: TelegramClient,
 ): Promise<void> {
   const message = event.message;
-  if (!message.text || message.text.trim().length < 30) return;
+  if (!message.text || message.text.trim().length < 20) return;
 
-  // Spam tekshiruvi
   if (isSpam(message.text)) {
     logger.debug(CTX, "Spam/reklama — o'tkazildi");
     return;
@@ -107,10 +122,16 @@ async function handleNewMessage(
       channelName = chat.title;
     }
   } catch {
-    // ignore — ba'zan getChat() ishlamaydi
+    // ignore
   }
 
   const messageId = BigInt(message.id);
+
+  // Telegram post linki
+  const messageLink =
+    channelName !== "unknown"
+      ? `https://t.me/${channelName}/${message.id}`
+      : null;
 
   // Duplicate tekshirish
   const exists = await prisma.vacancy.findUnique({
@@ -120,7 +141,7 @@ async function handleNewMessage(
   if (exists) return;
 
   // Parse qilish
-  const parsed = parseVacancy(message.text);
+  const parsed = parseVacancy(message.text, channelName);
   if (!parsed) {
     logger.debug(CTX, `Vakansiya emas — ${channelName}`);
     return;
@@ -134,6 +155,7 @@ async function handleNewMessage(
     type: parsed.jobType,
     level: parsed.level,
     workType: parsed.workType,
+    link: messageLink,
   });
 
   // DB ga saqlash
@@ -142,6 +164,7 @@ async function handleNewMessage(
       text: message.text,
       channel: channelName,
       messageId,
+      messageLink,
       title: parsed.title,
       company: parsed.company,
       location: parsed.location,
@@ -171,7 +194,6 @@ export async function startParser(): Promise<void> {
     onError: (err) => logger.error(CTX, "Auth xato", { error: err.message }),
   });
 
-  // Session ni bir marta log qilamiz
   const savedSession = client.session.save() as unknown as string;
   if (savedSession && !process.env.SESSION_STRING) {
     logger.info(
