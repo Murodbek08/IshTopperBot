@@ -39,8 +39,8 @@ const TECH_ALIASES: Record<string, string[]> = {
   "Angular":       ["angular", "angularjs"],
   "Next.js":       ["next.js", "nextjs", "next js"],
   "Nuxt.js":       ["nuxt.js", "nuxtjs", "nuxt"],
-  "JavaScript":    ["javascript", "js "],            // trailing space — "js" alone
-  "TypeScript":    ["typescript", "ts "],
+  "JavaScript":    ["javascript", "js ", "js,", "js.", "js\n", "#js"],
+  "TypeScript":    ["typescript", "ts ", "ts,", "ts.", "ts\n", "#ts"],
   "HTML":          ["html", "html5"],
   "CSS":           ["css", "css3"],
   "SCSS":          ["scss", "sass"],
@@ -212,9 +212,9 @@ function vacancyScore(text: string): number {
   const t = text.toLowerCase();
 
   // Aniq vakansiya/rezyume belgilari (katta ball)
-  if (/kerak\b|вакансия|vacancy|#ish\b|#vakansiya|ishga\s*qabul/i.test(t)) score += 4;
+  if (/kerak\b|вакансия|vacancy|#ish\b|#vakansiya|ishga\s*qabul|bo.sh\s*ish|ishchi\s*kerak/i.test(t)) score += 4;
   if (/#резюме|#resume|rezyume|резюме/i.test(t))                            score += 4;
-  if (/ish\s*e.lon|ish\s*o.rni|xodim\s*kerak|сотрудник\s*нужен/i.test(t)) score += 4;
+  if (/ish\s*e.lon|ish\s*o.rni|xodim\s*kerak|сотрудник\s*нужен|qidirilmoqda|izlanmoqda/i.test(t)) score += 4;
 
   // Kasb unvonlari
   if (/developer|dasturchi|engineer|инженер/i.test(t))                      score += 3;
@@ -240,7 +240,8 @@ function vacancyScore(text: string): number {
   // O'zbek IT konteksti
   if (/tajriba|опыт\s*работы|experience/i.test(t))                         score += 1;
   if (/murojaat|резюме отправить|cv qabul|apply/i.test(t))                  score += 1;
-  if (/remote|masofaviy|офис|ofis\b/i.test(t))                             score += 1;
+  if (/remote|masofaviy|офис|ofis\b|uzoqdan\s*ishlash/i.test(t))           score += 1;
+  if (/ish\s*vaqti|to.liq\s*stavka|yarim\s*stavka|part.?time|full.?time/i.test(t)) score += 1;
 
   return score;
 }
@@ -313,7 +314,14 @@ function parseSalaryNumber(raw: string): { min: number | null; max: number | nul
     return { min: Math.round(parseFloat(eur[1].replace(",", "")) * 13500), max: null };
   }
 
-  // "Xmln" / "X mln"
+  // "Xmln" / "X mln" / "X–Y mln"
+  const mlnRange = raw.match(/([\d.]+)\s*[-–—]\s*([\d.]+)\s*m(?:ln|illion|лн)/i);
+  if (mlnRange) {
+    return {
+      min: Math.round(parseFloat(mlnRange[1]) * 1_000_000),
+      max: Math.round(parseFloat(mlnRange[2]) * 1_000_000),
+    };
+  }
   const mln = raw.match(/([\d.]+)\s*m(?:ln|illion|лн)/i);
   if (mln) {
     return { min: Math.round(parseFloat(mln[1]) * 1_000_000), max: null };

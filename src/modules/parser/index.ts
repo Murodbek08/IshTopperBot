@@ -13,35 +13,56 @@ const CTX = "Parser";
 
 // ─── Kuzatiladigan kanallar ───────────────────────────────────────────────────
 const CHANNELS = [
-  "UstozShogird",
-  "vakansiyalar_uz_uz",
-  "freelancer_Uzbek",
-  "unilance",
-  "ayti_jobs",
-  "joblinkuz",
-  "data_ish",
-  "we_use_js",
-  "nodejsjobsfeed",
-  "qamar_ads",
-  "ishmi_ish",
-  "Exampleuz",
-  "techjobs_vakansiya",
-  "freelance_link",
-  "frontend",
-  "upjobsuz",
-  "Jobs_uz_vacancy",
-  "kasbim_uz",
-  "UstozShogirdSohalar",
-  "freelance_uzb",
-  "itmarket_uz",
-  "rabotak_razrabotchik",
-  "it_jobs_uz",
-  "fintech_jobs",
-  "click_jobs",
-  "jobmarket_uz",
-  "rizqimuz",
-  "frontEndJobo",
-  "frontendVacancy",
+  // ── Mavjud kanallar ──────────────────────────────────────────────────────
+  "UstozShogird",           // Ustoz-Shogird — o'zbek IT hamjamiyati
+  "vakansiyalar_uz_uz",     // Vakansiyalar UZ
+  "freelancer_Uzbek",       // Freelancer Uzbekistan
+  "unilance",               // Unilance — freelance platform
+  "ayti_jobs",              // AytiJobs
+  "joblinkuz",              // JobLink UZ
+  "data_ish",               // Data Science ish o'rinlari
+  "we_use_js",              // JS developers vakansiya
+  "nodejsjobsfeed",         // Node.js jobs
+  "qamar_ads",              // Qamar ads — vakansiyalar
+  "ishmi_ish",              // Ish bor — vakansiyalar
+  "Exampleuz",              // Example.uz IT Jobs
+  "techjobs_vakansiya",     // Tech Jobs Vakansiya
+  "freelance_link",         // Freelance Link
+  "frontend",               // Frontend developers
+  "upjobsuz",               // UpJobs UZ
+  "Jobs_uz_vacancy",        // Jobs UZ Vacancy
+  "kasbim_uz",              // Kasbim.uz
+  "UstozShogirdSohalar",    // Ustoz-Shogird sohalar
+  "freelance_uzb",          // Freelance UZB
+  "itmarket_uz",            // IT Market UZ
+  "rabotak_razrabotchik",   // Razrabotchik ish o'rinlari
+  "it_jobs_uz",             // IT Jobs UZ
+  "fintech_jobs",           // FinTech Jobs
+  "click_jobs",             // ClickJobs — yuqori maoshli IT
+  "jobmarket_uz",           // Job Market UZ
+  "rizqimuz",               // Rizqim.uz
+  "frontEndJobo",           // Frontend jobs
+  "frontendVacancy",        // Frontend Vacancy
+
+  // ── Yangi qo'shilgan kanallar ─────────────────────────────────────────
+  "uzdev_jobs",             // UzDev Jobs — turli kompaniyalar vakansiyalari
+  "ITjobs_Uzbekistan",      // Uzbekistan IT Jobs — Toshkent va O'zbekiston
+  "itjobstashkent",         // IT Jobs Tashkent
+  "ishgo_uz",               // IshGO — umumiy ish o'rinlari
+  "uzpythonjobs",           // Python vakansiyalar O'zbekiston
+  "ishtop",                 // Ish Top — kunlik vakansiyalar
+  "ish_toshkent",           // Ish Toshkent — Toshkent vakansiyalari
+  "ishtoparuz_kanal",       // IshTopar.uz — minglab vakansiyalar
+  "ish_boru",               // Bo'sh ishlar e'lonlar — barcha viloyatlar
+  "it_vakansii_jobs",       // IT vakansiyalar (RU/UZ)
+  "uzdev",                  // UzDev — o'zbek dasturchilar hamjamiyati
+  "flutter_jobs_uz",        // Flutter developer vakansiyalar
+  "android_jobs_uz",        // Android developer vakansiyalar
+  "backend_jobs_uz",        // Backend developer vakansiyalar
+  "designjobs_uz",          // Design vakansiyalar UZ
+  "qamarkonsult",           // Qamar konsult — IT HR
+  "it_hr_uz",               // IT HR UZ — recruiterlar
+  "devjobs_uz",             // DevJobs UZ
 ] as const;
 
 // ─── Channel name cache ───────────────────────────────────────────────────────

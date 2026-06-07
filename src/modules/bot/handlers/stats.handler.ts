@@ -50,7 +50,7 @@ export function registerStatsHandler(bot: Telegraf, sessions: SessionStore) {
       `   ↳ ${lastVac}\n\n` +
       `🌐 <b>Tizim:</b>\n` +
       `   Bazada vakansiya: <b>${totalVacancies.toLocaleString("ru")} ta</b>\n` +
-      `   Kuzatilayotgan kanallar: <b>29 ta</b>`,
+      `   Kuzatilayotgan kanallar: <b>47 ta</b>`,
       {
         parse_mode: "HTML",
         ...Markup.inlineKeyboard([
