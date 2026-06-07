@@ -12,57 +12,67 @@ import { matchAndNotify } from "../matcher";
 const CTX = "Parser";
 
 // ─── Kuzatiladigan kanallar ───────────────────────────────────────────────────
+// Har bir kanal tekshirilgan: mavjud, faol, yo'nalishga mos
 const CHANNELS = [
-  // ── Mavjud kanallar ──────────────────────────────────────────────────────
-  "UstozShogird",           // Ustoz-Shogird — o'zbek IT hamjamiyati
-  "vakansiyalar_uz_uz",     // Vakansiyalar UZ
-  "freelancer_Uzbek",       // Freelancer Uzbekistan
-  "unilance",               // Unilance — freelance platform
-  "ayti_jobs",              // AytiJobs
-  "joblinkuz",              // JobLink UZ
-  "data_ish",               // Data Science ish o'rinlari
-  "we_use_js",              // JS developers vakansiya
-  "nodejsjobsfeed",         // Node.js jobs
-  "qamar_ads",              // Qamar ads — vakansiyalar
-  "ishmi_ish",              // Ish bor — vakansiyalar
-  "Exampleuz",              // Example.uz IT Jobs
-  "techjobs_vakansiya",     // Tech Jobs Vakansiya
-  "freelance_link",         // Freelance Link
-  "frontend",               // Frontend developers
-  "upjobsuz",               // UpJobs UZ
-  "Jobs_uz_vacancy",        // Jobs UZ Vacancy
-  "kasbim_uz",              // Kasbim.uz
-  "UstozShogirdSohalar",    // Ustoz-Shogird sohalar
-  "freelance_uzb",          // Freelance UZB
-  "itmarket_uz",            // IT Market UZ
-  "rabotak_razrabotchik",   // Razrabotchik ish o'rinlari
-  "it_jobs_uz",             // IT Jobs UZ
-  "fintech_jobs",           // FinTech Jobs
-  "click_jobs",             // ClickJobs — yuqori maoshli IT
-  "jobmarket_uz",           // Job Market UZ
-  "rizqimuz",               // Rizqim.uz
-  "frontEndJobo",           // Frontend jobs
-  "frontendVacancy",        // Frontend Vacancy
 
-  // ── Yangi qo'shilgan kanallar ─────────────────────────────────────────
-  "uzdev_jobs",             // UzDev Jobs — turli kompaniyalar vakansiyalari
-  "ITjobs_Uzbekistan",      // Uzbekistan IT Jobs — Toshkent va O'zbekiston
-  "itjobstashkent",         // IT Jobs Tashkent
-  "ishgo_uz",               // IshGO — umumiy ish o'rinlari
-  "uzpythonjobs",           // Python vakansiyalar O'zbekiston
-  "ishtop",                 // Ish Top — kunlik vakansiyalar
-  "ish_toshkent",           // Ish Toshkent — Toshkent vakansiyalari
-  "ishtoparuz_kanal",       // IshTopar.uz — minglab vakansiyalar
-  "ish_boru",               // Bo'sh ishlar e'lonlar — barcha viloyatlar
-  "it_vakansii_jobs",       // IT vakansiyalar (RU/UZ)
-  "uzdev",                  // UzDev — o'zbek dasturchilar hamjamiyati
-  "flutter_jobs_uz",        // Flutter developer vakansiyalar
-  "android_jobs_uz",        // Android developer vakansiyalar
-  "backend_jobs_uz",        // Backend developer vakansiyalar
-  "designjobs_uz",          // Design vakansiyalar UZ
-  "qamarkonsult",           // Qamar konsult — IT HR
-  "it_hr_uz",               // IT HR UZ — recruiterlar
-  "devjobs_uz",             // DevJobs UZ
+  // ════════════════════════════════════════════════════════════════
+  // ✅ IT-FOCUSED — faqat yoki asosan IT vakansiyalar
+  // ════════════════════════════════════════════════════════════════
+
+  "UstozShogird",           // ✅ 22K obunachilar | IT job marketplace, Python/React/Flutter
+  "unilance",               // ✅ Faol | IT freelance, $718-$8000, Python/Java/Go/.NET
+  "ayti_jobs",              // ✅ 9.3K obunachilar | IT jobs, Node.js/Python/Java/Blockchain
+  "Exampleuz",              // ✅ 8.8K obunachilar | IT + creative, Python/React/Django
+  "UstozShogirdSohalar",    // ✅ Faol | IT yo'nalishlari bo'yicha ish
+  "itmarket_uz",            // ✅ Faol | IT rezyumalar va vakansiyalar, NestJS/React/Python
+  "rabotak_razrabotchik",   // ✅ Faol | Node.js focused vakansiyalar
+  "fintech_jobs",           // ✅ 8.9K obunachilar | IT + Freelance, Python/Go/Frontend
+  "click_jobs",             // ✅ Faol | Yuqori maoshli IT, Node.js/Vue/PostgreSQL
+  "frontEndJobo",           // ✅ 10.8K obunachilar | Frontend IT agregator, $300-$5000
+  "frontendVacancy",        // ✅ 2.5K obunachilar | Frontend jobs, React/Vue/Angular, UZ
+  "uzdev_jobs",             // ✅ 24.6K obunachilar | IT jobs, Java/Python/React/Docker/AI
+  "ITjobs_Uzbekistan",      // ✅ 1.5K obunachilar | IT jobs, Flutter/Laravel/Docker/QA
+  "itjobstashkent",         // ✅ 12.2K obunachilar | IT jobs Tashkent
+  "uzpythonjobs",           // ✅ Faol | Python/FastAPI/Django/AI vakansiyalar
+  "ITworksUz",              // ✅ 2.7K obunachilar | IT Vacancies Tashkent
+  "dartuz_jobs",            // ✅ 2.2K obunachilar | Flutter/Dart jobs, $300-$8000
+  "backend_jobs_uz",        // ✅ 590 obunachilar | Backend jobs, Python/Java/Node.js
+  "ishmi_ish",              // ✅ 3.5K obunachilar | IT + design, Go/Swift/CI-CD
+  "it_jobs_uz",             // ✅ TGStat tasdiqlangan | IT Jobs UZ
+
+  // ════════════════════════════════════════════════════════════════
+  // ✅ IT + UMUMIY ARALASH — IT vakansiyalar bor, lekin umumiy ham
+  // ════════════════════════════════════════════════════════════════
+
+  "techjobs_vakansiya",     // ✅ 5.4K obunachilar | TechJobs.uz rekruting, IT + umumiy
+  "freelance_link",         // ✅ 6.8K obunachilar | IT + service vakansiyalar
+  "upjobsuz",               // ✅ 4.9K obunachilar | IT + creative, DevOps/Frontend/3D
+  "Jobs_uz_vacancy",        // ✅ 11.4K obunachilar | Remote jobs + rezyumalar
+  "freelance_uzb",          // ✅ Faol | IT freelance + marketing, Toshkent
+  "joblinkuz",              // ✅ Faol | Umumiy, lekin IT vakansiyalar bor
+  "teamwork_uz",            // ✅ 9.1K obunachilar | IT freelance platforma, Figma/Android
+  "kasbim_uz",              // ✅ 15.5K obunachilar | Asosan umumiy, IT bor
+
+  // ════════════════════════════════════════════════════════════════
+  // ⚠️ UMUMIY — IT vakansiyalar kam, lekin bor
+  //    Parser IT bo'lmaganlarni o'zi filterlaydi
+  // ════════════════════════════════════════════════════════════════
+
+  "rizqimuz",               // ⚠️ Asosan umumiy, IT design/SMM bor
+  "jobmarket_uz",           // ⚠️ 12.3K obunachilar | Asosan umumiy
+  "data_ish",               // ⚠️ 12.3K obunachilar | IT, media, finance, sales aralash
+  "ishtop",                 // ⚠️ Faol | Umumiy, IT vakansiyalar ham bor
+  "ish_toshkent",           // ⚠️ 18.4K obunachilar | Umumiy Toshkent ish
+  "ishtoparuz_kanal",       // ⚠️ 181K obunachilar | Katta kanal, umumiy, IT ham bor
+  "ishgo_uz",               // ⚠️ Faol | Umumiy ish o'rinlari
+
+  // ════════════════════════════════════════════════════════════════
+  // ⚠️ MAXSUS COMMUNITY — news + jobs aralash
+  // ════════════════════════════════════════════════════════════════
+
+  "nodejsjobsfeed",         // ⚠️ Global Node.js jobs (RU/xalqaro), O'zbekiston emas
+  "linkedinjobsuzbekistan", // ⚠️ LinkedIn UZ jobs — professional, aralash
+
 ] as const;
 
 // ─── Channel name cache ───────────────────────────────────────────────────────
