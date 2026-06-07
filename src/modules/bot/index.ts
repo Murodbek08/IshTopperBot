@@ -19,7 +19,7 @@ registerStartHandler(bot);
 registerStatsHandler(bot, sessions);
 registerSettingsHandler(bot, sessions);
 registerFilterHandlers(bot, sessions);
-registerAdminHandler(bot);        // Admin handler OXIRIGA yaqin — text handler bor
+registerAdminHandler(bot, sessions); // Admin handler OXIRIGA yaqin — text handler bor
 registerMessageHandler(bot, sessions); // Fallback — ENG OXIRIDA
 
 // Global xato ushlagich

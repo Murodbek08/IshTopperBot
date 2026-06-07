@@ -3,6 +3,7 @@ import { prisma } from "../../../lib/prisma";
 import { escapeHtml, formatDate, sleep } from "../utils";
 import { config } from "../../../config";
 import { bot } from "../index";
+import type { SessionStore } from "../session";
 
 const PAGE_SIZE = 10;
 
@@ -13,7 +14,7 @@ function isAdmin(id: number): boolean {
   return config.adminIds.includes(id);
 }
 
-export function registerAdminHandler(telegraf: Telegraf) {
+export function registerAdminHandler(telegraf: Telegraf, sessions?: SessionStore) {
 
   // ── /admin ────────────────────────────────────────────────────────────────
   telegraf.command("admin", async (ctx) => {
@@ -63,11 +64,15 @@ export function registerAdminHandler(telegraf: Telegraf) {
   });
 
   // ── Broadcast text handler (ADMIN uchun) ──────────────────────────────────
-  // Eslatma: bu handler bot.on("text") sifatida ADMIN UCHUN ONLY ishlaydi.
-  // message.handler.ts dagi fallback handler admin bo'lmagan userlar uchun.
   telegraf.on("text", async (ctx, next) => {
     const userId = ctx.from.id;
+    // Agar admin emas yoki broadcast kutmayotgan bo'lsa — o'tkazib yuborish
     if (!isAdmin(userId) || !broadcastPending.has(userId)) {
+      return next();
+    }
+    // Agar foydalanuvchida boshqa aktiv session bo'lsa (masalan qidirish) — o'tkazib yuborish
+    if (sessions?.get(userId)) {
+      broadcastPending.delete(userId);
       return next();
     }
     broadcastPending.delete(userId);
