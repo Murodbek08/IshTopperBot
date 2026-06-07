@@ -206,7 +206,7 @@ export async function startParser(): Promise<void> {
   // addEventHandler qayta chaqirilmaydi — duplicate handler muammosinining oldini oladi
   client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
 
-  logger.info(CTX, `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`, {
+  logger.info(CTX, `✅ Parser ishga tushdi — ${chats.length} kanal kuzatilmoqda`, {
     channels: CHANNELS,
   });
 
