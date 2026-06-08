@@ -317,7 +317,7 @@ function extractLabel(text: string, labels: string[]): string | null {
   for (const label of labels) {
     const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const re = new RegExp(
-      `(?:^|\\n)[^\\n]{0,20}${esc}[^\\n]{0,8}[:\\-–—][ \\t]*(.+)`,
+      `(?:^|\\n)[^\\n]{0,20}${esc}[^\\n]{0,20}[:\\-–—][ \\t]*(.+)`,
       "im",
     );
     const m = text.match(re);
@@ -339,7 +339,7 @@ function vacancyScore(text: string): number {
   if (/kerak\b|вакансия|vacancy|#ish\b|#vakansiya|ishga\s*qabul/i.test(t))       score += 4;
   if (/#резюме|#resume|rezyume|резюме/i.test(t))                                  score += 4;
   if (/ish\s*e.lon|ish\s*o.rni|xodim\s*kerak|сотрудник\s*нужен/i.test(t))        score += 4;
-  if (/qidirilmoqda|izlayapmiz|taklif\s*qilamiz|qabul\s*qilamiz/i.test(t))       score += 4;
+  if (/qidirilmoqda|izlayapmiz|izlanmoqda|taklif\s*qilamiz|qabul\s*qilamiz|talab\s*etiladi|taklif\s*etamiz|qabul\s*qilinadi/i.test(t)) score += 4;
   if (/bo.sh\s*o.rin|bo.sh\s*ish|ishchi\s*qidirilyapti/i.test(t))                score += 4;
   if (/hiring|we.re\s*hiring|we\s*are\s*hiring|looking\s*for\s*a?\s*(dev|eng)/i.test(t)) score += 4;
   if (/join\s*(our|us|team)|open\s*position|job\s*opening/i.test(t))              score += 3;
@@ -418,6 +418,7 @@ function parseTechnologies(text: string): string[] {
   // - bosh-oxirga bo'shliq qo'shamiz (" java " alias end-of-text ni ushlaydi)
   const searchIn = ` ${text} ${hashtags} `
     .toLowerCase()
+    .replace(/[*_~`]/g, " ")                          // Markdown formatting (bold/italic/code)
     .replace(/[,;:()[\]{}/\\!?'"«»·•\-]/g, " ")
     .replace(/\s+/g, " ");
 
@@ -442,6 +443,15 @@ function parseSalaryNumber(raw: string): { min: number | null; max: number | nul
     const a = parseNum(ruRange[1]);
     const b = parseNum(ruRange[2]);
     if (a && b) return { min: Math.min(a, b), max: Math.max(a, b) };
+  }
+
+  // "X mln - Y mln" (har bir raqamdan keyin birlik)
+  const mlnRange2 = raw.match(/([\d.]+)\s*m(?:ln|illion|лн)\s*[-–—]\s*([\d.]+)\s*m(?:ln|illion|лн)/i);
+  if (mlnRange2) {
+    return {
+      min: Math.round(parseFloat(mlnRange2[1]) * 1_000_000),
+      max: Math.round(parseFloat(mlnRange2[2]) * 1_000_000),
+    };
   }
 
   // "X–Y mln" yoki "X-Y mln" (O'zbek format: "3–5 mln so'm")
@@ -602,8 +612,10 @@ function parseTelegramContact(text: string, channelName?: string): string | null
   for (const handle of all) {
     const h = handle.toLowerCase();
     if (h === chLower) continue;
-    if (h.endsWith("_channel") || h.endsWith("_kanal")) continue;
-    if (/news|kanal|channel|official|admin(?!_)|jobs(?!_)|vacancy|vakans/.test(h)) continue;
+    // Kanal yoki bot ko'rinishidagi username larni o'tkazib yuboramiz
+    if (h.endsWith("_channel") || h.endsWith("_kanal") || h.endsWith("channel") || h.endsWith("kanal")) continue;
+    if (h.endsWith("bot") && h.length > 5) continue;            // @somebot → skip, lekin @robot → skip
+    if (/^(?:news|official|info|support)/.test(h)) continue;    // boshida kanal so'zi
     return `@${handle}`;
   }
 
@@ -651,7 +663,7 @@ function parseTitle(text: string): string | null {
 
   // 4. Birinchi 5 qatordan kasb unvonini qidirish
   const lines = text.split("\n");
-  for (const line of lines.slice(0, 5)) {
+  for (const line of lines.slice(0, 8)) {
     const c = cleanLine(line).trim();
     if (c.length < 5 || c.length > 160) continue;
     if (

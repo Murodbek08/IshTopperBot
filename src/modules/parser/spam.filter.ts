@@ -31,8 +31,8 @@ const HARD_SPAM: RegExp[] = [
   /сетевой\s*маркетинг|network\s*marketing|реферальн/i,
   /referral\s*(program|link|bonus)\s*(?!.{0,30}(?:developer|engineer))/i,
 
-  // Joinchat havolalar (faqat sxema ko'rinishidagilar)
-  /t\.me\/\+[A-Za-z0-9_-]{10,}/i,
+  // Joinchat havolalar — FAQAT sxema bilan birga (yakka holda legit vakansiyalarda ham bo'ladi)
+  // /t\.me\/\+[A-Za-z0-9_-]{10,}/i,  ← olib tashlandi: ko'p real vakansiyalar invite link beradi
 
   // Kurs/trening spam ("o'rganing va \$X ishlang" formati)
   /(?:o.rganing|kurs\s*bor|курс\s*есть).{0,80}(?:\$\d+|заработ)/i,
