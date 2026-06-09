@@ -51,7 +51,7 @@ function keywordMatches(keyword: string, text: string, technologies: string[]): 
     const tFlat = tech.toLowerCase().replace(/[.\-\s]+/g, "");
     if (tFlat === kwFlat || tech.toLowerCase() === kw ||
         tFlat.includes(kwFlat) || kwFlat.includes(tFlat)) {
-      if (kwFlat.length >= 3 && tFlat.length >= 3) return true;
+      if (kwFlat.length >= 2 && tFlat.length >= 2) return true;
     }
   }
 

@@ -193,44 +193,46 @@ function createClient(): TelegramClient {
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
-export async function startParser(): Promise<void> {
-  const client = createClient();
+export function startParser(): Promise<void> {
+  return new Promise<void>(async (resolve, reject) => {
+    const client = createClient();
 
-  await client.start({
-    phoneNumber: async () => input.text("📱 Telefon raqamingiz (+998...): "),
-    password:    async () => input.text("🔒 2FA parol (bo'lmasa Enter): "),
-    phoneCode:   async () => input.text("📨 SMS kod: "),
-    onError:     (err) => logger.error(CTX, "Auth xato", { error: err.message }),
-  });
+    await client.start({
+      phoneNumber: async () => input.text("📱 Telefon raqamingiz (+998...): "),
+      password:    async () => input.text("🔒 2FA parol (bo'lmasa Enter): "),
+      phoneCode:   async () => input.text("📨 SMS kod: "),
+      onError:     (err) => logger.error(CTX, "Auth xato", { error: err.message }),
+    });
 
-  // Birinchi marta session string logga chiqariladi
-  const savedSession = client.session.save() as unknown as string;
-  if (savedSession && !config.sessionString) {
-    logger.info(CTX, `SESSION_STRING ni .env ga qo'ying:\nSESSION_STRING="${savedSession}"`);
-  }
-
-  const chats = CHANNELS.map((ch) => `@${ch}`);
-
-  // MUHIM: handler faqat BIR MARTA qo'shiladi
-  // Reconnect bo'lganda TelegramClient avtomatik qayta ulanadi (autoReconnect: true)
-  // addEventHandler qayta chaqirilmaydi — duplicate handler muammosinining oldini oladi
-  client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
-
-  logger.info(CTX, `✅ Parser ishga tushdi — ${chats.length} kanal kuzatilmoqda`, {
-    channels: CHANNELS,
-  });
-
-  // Ulanish monitoringi — 5 daqiqada bir tekshirish
-  setInterval(async () => {
-    try {
-      if (!client.connected) {
-        logger.warn(CTX, "Ulanish yo'q — qayta ulanmoqda...");
-        await client.connect();
-        logger.info(CTX, "✅ Qayta ulandi");
-        // addEventHandler CHAQIRILMAYDI — mavjud handler saqlanadi
-      }
-    } catch (err: any) {
-      logger.error(CTX, "Reconnect xato", { error: err?.message });
+    const savedSession = client.session.save() as unknown as string;
+    if (savedSession && !config.sessionString) {
+      logger.info(CTX, `SESSION_STRING ni .env ga qo'ying:\nSESSION_STRING="${savedSession}"`);
     }
-  }, 5 * 60 * 1000);
+
+    const chats = CHANNELS.map((ch) => `@${ch}`);
+    client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
+
+    logger.info(CTX, `✅ Parser ishga tushdi — ${chats.length} kanal kuzatilmoqda`, {
+      channels: CHANNELS,
+    });
+
+    // Ulanish monitoringi — 5 daqiqada bir haqiqiy API ping
+    // client.connected yetarli emas — "zombie" ulanishni ushlamas
+    const pingInterval = setInterval(async () => {
+      try {
+        await Promise.race([
+          client.getMe(),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error("Ping timeout 30s")), 30_000),
+          ),
+        ]);
+        logger.debug(CTX, "Ping OK ✅");
+      } catch (err: any) {
+        logger.error(CTX, `Ping xato — parser qayta ishga tushadi: ${err?.message}`);
+        clearInterval(pingInterval);
+        client.disconnect().catch(() => {});
+        reject(err); // runParserForever() ni ishga tushiradi
+      }
+    }, 5 * 60 * 1000);
+  });
 }

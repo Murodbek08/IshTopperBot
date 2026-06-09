@@ -79,6 +79,23 @@ async function runBotForever(): Promise<void> {
   }
 }
 
+// ─── Parser ni qayta ishga tushiruvchi wrapper ────────────────────────────────
+async function runParserForever(): Promise<void> {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      logger.info(CTX, `Parser ishga tushirilmoqda (urinish #${attempt})...`);
+      await startParser();
+      logger.warn(CTX, "Parser to'xtatildi — 30s dan keyin qayta ishga tushadi");
+    } catch (err: any) {
+      const wait = Math.min(attempt * 10000, 120000);
+      logger.error(CTX, `Parser xato (${err?.message}) — ${wait / 1000}s kutilmoqda...`);
+      await new Promise((res) => setTimeout(res, wait));
+    }
+  }
+}
+
 // ─── Main ──────────────────────────────────────────────────────────────────────
 async function main(): Promise<void> {
   logger.info(CTX, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -99,13 +116,10 @@ async function main(): Promise<void> {
   startHealthServer();
   startKeepAlive();
 
-  // Bot va parser parallel — bot xato bo'lsa qayta urinadi, process o'lmaydi
+  // Bot va parser parallel — ikkalasi ham xato bo'lsa qayta urinadi
   await Promise.all([
     runBotForever(),
-    startParser().catch((err: Error) => {
-      logger.error(CTX, "❌ Parser ishga tushmadi", { error: err.message });
-      // Parser o'lsa ham process o'lmasin — bot ishlashda davom etadi
-    }),
+    runParserForever(),
   ]);
 }
 
