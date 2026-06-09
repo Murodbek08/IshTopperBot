@@ -172,10 +172,15 @@ async function processMessage(
   }
 }
 
+// ─── Kuzatiladigan kanallar set (tez lookup uchun, lowercase) ─────────────────
+const CHANNELS_SET = new Set(CHANNELS.map((ch) => ch.toLowerCase()));
+
 // ─── Event handler ────────────────────────────────────────────────────────────
 async function handleNewMessage(event: NewMessageEvent): Promise<void> {
   try {
     const channelName = await resolveChannelName(event.message);
+    // Faqat kuzatiladigan kanallardan kelgan xabarlarni qayta ishlash
+    if (!CHANNELS_SET.has(channelName.toLowerCase())) return;
     await processMessage(event.message, channelName);
   } catch (err: any) {
     logger.error(CTX, "handleNewMessage xato", { error: err?.message ?? String(err) });
@@ -209,10 +214,11 @@ export function startParser(): Promise<void> {
       logger.info(CTX, `SESSION_STRING ni .env ga qo'ying:\nSESSION_STRING="${savedSession}"`);
     }
 
-    const chats = CHANNELS.map((ch) => `@${ch}`);
-    client.addEventHandler(handleNewMessage, new NewMessage({ chats }));
+    // chats filteri yo'q — username resolution flood wait ni oldini oladi
+    // Kanal filtrlash handleNewMessage ichida CHANNELS_SET orqali amalga oshiriladi
+    client.addEventHandler(handleNewMessage, new NewMessage({}));
 
-    logger.info(CTX, `✅ Parser ishga tushdi — ${chats.length} kanal kuzatilmoqda`, {
+    logger.info(CTX, `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`, {
       channels: CHANNELS,
     });
 
