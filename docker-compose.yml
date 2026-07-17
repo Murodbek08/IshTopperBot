@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: murodbek2008
+      POSTGRES_DB: ishbot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ishbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    # Baza docker ichida — DATABASE_URL 'localhost' emas, 'db' xostiga ishlaydi
+    # (env_file dagi DATABASE_URL shu bilan almashtiriladi)
+    environment:
+      DATABASE_URL: postgresql://postgres:murodbek2008@db:5432/ishbot
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
