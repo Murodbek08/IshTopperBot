@@ -1,5 +1,6 @@
 import { ai, AI_MODEL } from "../../lib/ai";
 import { logger } from "../../lib/logger";
+import { sleep } from "../bot/utils";
 
 const CTX = "AIParser";
 
@@ -18,6 +19,9 @@ export interface ParsedVacancy {
   jobType:         "vacancy" | "resume";
   isActive:        boolean;
 }
+
+/** AI chaqiruvi qayta urinishlardan keyin ham muvaffaqiyatsiz bo'lganda tashlanadi. */
+export class AIParseError extends Error {}
 
 const SYSTEM_PROMPT = `Sen Telegram kanallaridagi IT ish e'lonlarini tahlil qiluvchi ekstraktorsan.
 Matn o'zbek, rus yoki ingliz tilida (aralash ham) bo'lishi mumkin.
@@ -46,50 +50,69 @@ const str = (v: unknown): string | null =>
 const num = (v: unknown): number | null =>
   typeof v === "number" && isFinite(v) && v > 0 ? Math.round(v) : null;
 
+function toParsed(d: Record<string, unknown>): ParsedVacancy {
+  return {
+    title:           str(d.title),
+    company:         str(d.company),
+    location:        str(d.location),
+    salary:          str(d.salary),
+    salaryMin:       num(d.salaryMin),
+    salaryMax:       num(d.salaryMax),
+    technologies:    Array.isArray(d.technologies)
+      ? d.technologies.filter((t): t is string => typeof t === "string" && t.trim() !== "").slice(0, 30)
+      : [],
+    telegramContact: str(d.telegramContact),
+    phone:           str(d.phone),
+    workType:        d.workType === "remote" || d.workType === "office" || d.workType === "hybrid" ? d.workType : null,
+    level:           d.level === "junior" || d.level === "middle" || d.level === "senior" ? d.level : null,
+    jobType:         d.jobType === "resume" ? "resume" : "vacancy",
+    isActive:        true,
+  };
+}
+
+const MAX_ATTEMPTS = 3;
+
 /**
  * Postni AI orqali tahlil qiladi.
- * IT vakansiya/rezyume bo'lmasa yoki xato bo'lsa null qaytadi (post o'tkazib yuboriladi).
+ * - IT vakansiya/rezyume bo'lmasa → null (ataylab o'tkazib yuborildi).
+ * - AI barcha urinishlardan keyin ham javob bera olmasa → AIParseError tashlanadi
+ *   (chaqiruvchi vakansiyani xom holda saqlab, yo'qotmasligi uchun).
  */
 export async function parseVacancy(
   text: string,
   channel: string,
 ): Promise<ParsedVacancy | null> {
-  try {
-    const res = await ai.chat.completions.create({
-      model:           AI_MODEL,
-      temperature:     0,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user",   content: text },
-      ],
-    });
+  let lastErr: unknown;
 
-    const raw = res.choices[0]?.message?.content;
-    if (!raw) return null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await ai.chat.completions.create({
+        model:           AI_MODEL,
+        temperature:     0,
+        max_tokens:      800,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user",   content: text },
+        ],
+      });
 
-    const d = JSON.parse(raw) as Record<string, unknown>;
-    if (d.isRelevant !== true) return null;
+      const raw = res.choices[0]?.message?.content;
+      if (!raw) throw new Error("AI bo'sh javob qaytardi");
 
-    return {
-      title:           str(d.title),
-      company:         str(d.company),
-      location:        str(d.location),
-      salary:          str(d.salary),
-      salaryMin:       num(d.salaryMin),
-      salaryMax:       num(d.salaryMax),
-      technologies:    Array.isArray(d.technologies)
-        ? d.technologies.filter((t): t is string => typeof t === "string" && t.trim() !== "").slice(0, 30)
-        : [],
-      telegramContact: str(d.telegramContact),
-      phone:           str(d.phone),
-      workType:        d.workType === "remote" || d.workType === "office" || d.workType === "hybrid" ? d.workType : null,
-      level:           d.level === "junior" || d.level === "middle" || d.level === "senior" ? d.level : null,
-      jobType:         d.jobType === "resume" ? "resume" : "vacancy",
-      isActive:        true,
-    };
-  } catch (err: any) {
-    logger.error(CTX, `AI parse xato — @${channel}: ${err?.message ?? err}`);
-    return null;
+      const d = JSON.parse(raw) as Record<string, unknown>;
+      if (d.isRelevant !== true) return null;
+
+      return toParsed(d);
+    } catch (err: any) {
+      lastErr = err;
+      logger.warn(CTX, `Urinish ${attempt}/${MAX_ATTEMPTS} muvaffaqiyatsiz — @${channel}: ${err?.message ?? err}`);
+      if (attempt < MAX_ATTEMPTS) await sleep(1000 * attempt); // 1s, 2s
+    }
   }
+
+  logger.error(CTX, `AI parse — barcha urinishlar tugadi @${channel}`, {
+    error: (lastErr as any)?.message ?? String(lastErr),
+  });
+  throw new AIParseError((lastErr as any)?.message ?? "AI parse xato");
 }

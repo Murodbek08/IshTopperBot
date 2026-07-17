@@ -5,9 +5,10 @@ import { NewMessage, NewMessageEvent } from "telegram/events";
 import { prisma } from "../../lib/prisma";
 import { logger } from "../../lib/logger";
 import { config } from "../../config";
-import { parseVacancy } from "./ai.parser";
+import { parseVacancy, AIParseError, type ParsedVacancy } from "./ai.parser";
 import { isSpam } from "./spam.filter";
 import { matchAndNotify } from "../matcher";
+import { sleep } from "../bot/utils";
 
 const CTX = "Parser";
 
@@ -129,8 +130,21 @@ async function processMessage(
   });
   if (exists) return;
 
-  // Parse (AI)
-  const parsed = await parseVacancy(text, channelName);
+  // Parse (AI) — AI barcha urinishlardan keyin ham xato bersa,
+  // vakansiyani yo'qotmaslik uchun xom holda (kalit so'z bo'yicha) saqlaymiz
+  let parsed: ParsedVacancy | null;
+  try {
+    parsed = await parseVacancy(text, channelName);
+  } catch (err: any) {
+    if (!(err instanceof AIParseError)) throw err;
+    logger.warn(CTX, `AI ishlamadi — xom holda saqlanadi @${channelName}`);
+    parsed = {
+      title: null, company: null, location: null, salary: null,
+      salaryMin: null, salaryMax: null, technologies: [],
+      telegramContact: null, phone: null, workType: null, level: null,
+      jobType: "vacancy", isActive: true,
+    };
+  }
   if (!parsed) {
     logger.info(CTX, `Score past — @${channelName} | "${text.slice(0, 60)}"`);
     return;
@@ -149,33 +163,51 @@ async function processMessage(
     techs:    parsed.technologies.slice(0, 5),
   });
 
-  try {
-    const vacancy = await prisma.vacancy.create({
-      data: {
-        text,
-        channel:         channelName,
-        messageId,
-        messageLink,
-        title:           parsed.title,
-        company:         parsed.company,
-        location:        parsed.location,
-        salary:          parsed.salary,
-        salaryMin:       parsed.salaryMin,
-        salaryMax:       parsed.salaryMax,
-        technologies:    parsed.technologies,
-        telegramContact: parsed.telegramContact,
-        phone:           parsed.phone,
-        workType:        parsed.workType,
-        level:           parsed.level,
-        jobType:         parsed.jobType,
-      },
-    });
+  // DB'ga yozish — vaqtinchalik ulanish xatosi bo'lsa qayta uriladi (vakansiya yo'qolmasin)
+  let vacancyId: number | null = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const vacancy = await prisma.vacancy.create({
+        data: {
+          text,
+          channel:         channelName,
+          messageId,
+          messageLink,
+          title:           parsed.title,
+          company:         parsed.company,
+          location:        parsed.location,
+          salary:          parsed.salary,
+          salaryMin:       parsed.salaryMin,
+          salaryMax:       parsed.salaryMax,
+          technologies:    parsed.technologies,
+          telegramContact: parsed.telegramContact,
+          phone:           parsed.phone,
+          workType:        parsed.workType,
+          level:           parsed.level,
+          jobType:         parsed.jobType,
+        },
+      });
+      vacancyId = vacancy.id;
+      break;
+    } catch (err: any) {
+      if (err?.code === "P2002") return; // bu xabar allaqachon saqlangan
+      logger.warn(CTX, `DB yozish urinish ${attempt}/3 muvaffaqiyatsiz: ${err?.message}`);
+      if (attempt < 3) await sleep(1000 * attempt);
+      else logger.error(CTX, "DB saqlashda xato — vakansiya yo'qotildi", { error: err?.message });
+    }
+  }
+  if (vacancyId === null) return;
 
-    await matchAndNotify(vacancy.id);
-  } catch (err: any) {
-    // messageId unique constraint — bu xabar allaqachon saqlangan
-    if (err?.code === "P2002") return;
-    logger.error(CTX, "DB saqlashda xato", { error: err?.message });
+  // Matching/yuborish — mustaqil qayta urinish (vakansiya saqlangan, faqat yuborish qolgan)
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await matchAndNotify(vacancyId);
+      return;
+    } catch (err: any) {
+      logger.warn(CTX, `matchAndNotify urinish ${attempt}/3 muvaffaqiyatsiz: ${err?.message}`);
+      if (attempt < 3) await sleep(1000 * attempt);
+      else logger.error(CTX, "matchAndNotify xato — foydalanuvchilarga yuborilmadi", { vacancyId, error: err?.message });
+    }
   }
 }
 
