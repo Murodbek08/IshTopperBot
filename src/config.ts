@@ -28,6 +28,12 @@ export const config = {
   apiHash:       requireEnv("API_HASH"),
   sessionString: optionalEnv("SESSION_STRING"),
   databaseUrl:   requireEnv("DATABASE_URL"),
+
+  // AI (provayder-agnostik — OpenAI-mos har qanday API)
+  aiApiKey:      requireEnv("AI_API_KEY"),
+  aiBaseUrl:     optionalEnv("AI_BASE_URL", "https://api.deepseek.com"),
+  aiModel:       optionalEnv("AI_MODEL", "deepseek-chat"),
+
   nodeEnv:       optionalEnv("NODE_ENV", "production"),
   port:          optionalInt("PORT", 3000),
   renderUrl:     optionalEnv("RENDER_URL"),

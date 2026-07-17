@@ -5,7 +5,7 @@ import { NewMessage, NewMessageEvent } from "telegram/events";
 import { prisma } from "../../lib/prisma";
 import { logger } from "../../lib/logger";
 import { config } from "../../config";
-import { parseVacancy } from "./vacancy.parser";
+import { parseVacancy } from "./ai.parser";
 import { isSpam } from "./spam.filter";
 import { matchAndNotify } from "../matcher";
 
@@ -94,8 +94,15 @@ async function resolveChannelName(message: NewMessageEvent["message"]): Promise<
     }
 
     if (key) channelCache.set(key, name);
+    if (name === "unknown") {
+      logger.warn(CTX, "Kanal nomi aniqlanmadi — xabar tashlanadi", {
+        chatId: key,
+        peerId: String((message as any).peerId ?? ""),
+      });
+    }
     return name;
-  } catch {
+  } catch (err: any) {
+    logger.warn(CTX, `resolveChannelName xato: ${err?.message}`);
     return "unknown";
   }
 }
@@ -109,7 +116,7 @@ async function processMessage(
   if (!text || text.length < 15) return;
 
   if (isSpam(text)) {
-    logger.debug(CTX, `Spam — @${channelName}`);
+    logger.info(CTX, `Spam — @${channelName} | "${text.slice(0, 60)}"`);
     return;
   }
 
@@ -122,10 +129,10 @@ async function processMessage(
   });
   if (exists) return;
 
-  // Parse
-  const parsed = parseVacancy(text, channelName);
+  // Parse (AI)
+  const parsed = await parseVacancy(text, channelName);
   if (!parsed) {
-    logger.debug(CTX, `Score past — @${channelName} | "${text.slice(0, 50)}..."`);
+    logger.info(CTX, `Score past — @${channelName} | "${text.slice(0, 60)}"`);
     return;
   }
 
@@ -179,8 +186,10 @@ const CHANNELS_SET = new Set(CHANNELS.map((ch) => ch.toLowerCase()));
 async function handleNewMessage(event: NewMessageEvent): Promise<void> {
   try {
     const channelName = await resolveChannelName(event.message);
-    // Faqat kuzatiladigan kanallardan kelgan xabarlarni qayta ishlash
-    if (!CHANNELS_SET.has(channelName.toLowerCase())) return;
+    if (!CHANNELS_SET.has(channelName.toLowerCase())) {
+      // "unknown" bo'lsa allaqachon warn chiqarilgan, boshqalar — oddiy shaxsiy chat
+      return;
+    }
     await processMessage(event.message, channelName);
   } catch (err: any) {
     logger.error(CTX, "handleNewMessage xato", { error: err?.message ?? String(err) });
@@ -202,25 +211,36 @@ export function startParser(): Promise<void> {
   return new Promise<void>(async (resolve, reject) => {
     const client = createClient();
 
+    // Productionda stdin yo'q — interaktiv auth talab qilinsa darhol xato
+    const requireInput = async (prompt: string): Promise<string> => {
+      if (!process.stdin.isTTY) {
+        throw new Error(
+          `SESSION_STRING eskirgan yoki yo'q. Interaktiv muhitda qayta yuring: ${prompt}`,
+        );
+      }
+      return input.text(prompt);
+    };
+
     await client.start({
-      phoneNumber: async () => input.text("📱 Telefon raqamingiz (+998...): "),
-      password:    async () => input.text("🔒 2FA parol (bo'lmasa Enter): "),
-      phoneCode:   async () => input.text("📨 SMS kod: "),
+      phoneNumber: () => requireInput("📱 Telefon raqamingiz (+998...): "),
+      password:    () => requireInput("🔒 2FA parol (bo'lmasa Enter): "),
+      phoneCode:   () => requireInput("📨 SMS kod: "),
       onError:     (err) => logger.error(CTX, "Auth xato", { error: err.message }),
     });
 
+    // Session yangilangan bo'lsa — har doim log qil (eskirgan .env uchun)
     const savedSession = client.session.save() as unknown as string;
-    if (savedSession && !config.sessionString) {
-      logger.info(CTX, `SESSION_STRING ni .env ga qo'ying:\nSESSION_STRING="${savedSession}"`);
+    if (savedSession) {
+      if (!config.sessionString || savedSession !== config.sessionString) {
+        logger.info(CTX, `SESSION_STRING yangilandi — .env ga saqlang:\nSESSION_STRING="${savedSession}"`);
+      }
     }
 
-    // chats filteri yo'q — username resolution flood wait ni oldini oladi
-    // Kanal filtrlash handleNewMessage ichida CHANNELS_SET orqali amalga oshiriladi
+    // Kanal usernamelari → kichik harf Set (tez lookup uchun)
+    // NewMessage({}) — filtrsiz barcha xabarlarni oladi, kanal tekshiruvi handleNewMessage'da
     client.addEventHandler(handleNewMessage, new NewMessage({}));
 
-    logger.info(CTX, `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`, {
-      channels: CHANNELS,
-    });
+    logger.info(CTX, `✅ Parser ishga tushdi — ${CHANNELS.length} kanal kuzatilmoqda`);
 
     // Ulanish monitoringi — 5 daqiqada bir haqiqiy API ping
     // client.connected yetarli emas — "zombie" ulanishni ushlamas
